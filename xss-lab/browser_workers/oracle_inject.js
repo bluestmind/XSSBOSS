@@ -29,6 +29,9 @@
     };
 
     window.__XSS__ = function(sinkType, value, errorStack) {
+        if (Array.isArray(sinkType)) {
+            sinkType = 'TemplateLiteral';
+        }
         if (value && typeof value === 'string' && !sinkType.startsWith('DOMSourceRead:')) {
             for (const [source, marker] of Object.entries(taintMarkers)) {
                 if (value.includes(marker)) {

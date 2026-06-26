@@ -111,6 +111,21 @@ class PayloadGenerator:
                         continue
                         
                 filtered_templates.append(template)
+
+        if filter_profile:
+            blocked_tokens = filter_profile.get('blocked_tokens', [])
+            if blocked_tokens:
+                def count_blocked(tpl: str) -> int:
+                    tpl_lower = tpl.lower()
+                    penalty = 0
+                    for token in blocked_tokens:
+                        if token.lower() in tpl_lower:
+                            if len(token) > 1:
+                                penalty += 10
+                            else:
+                                penalty += 1
+                    return penalty
+                filtered_templates.sort(key=count_blocked)
         
         if not filtered_templates and not (strategy in [Strategy.GENETIC_EVOLUTIONARY, Strategy.MAX_COVERAGE] or (filter_profile and (filter_profile.get('blocked_tokens') or filter_profile.get('waf_detected')))):
             return []
@@ -231,7 +246,8 @@ class PayloadGenerator:
         # Apply mutations to bypass blocked tokens if present
         payload_lower = payload.lower()
         if blocked_tokens:
-            has_blocked = any(token.lower() in payload_lower for token in blocked_tokens)
+            blocked_keywords = [t for t in blocked_tokens if len(t) > 1]
+            has_blocked = any(token.lower() in payload_lower for token in blocked_keywords)
             if has_blocked:
                 # Apply Unicode homoglyphs for blocked keywords
                 if mutation_strategy == 'unicode_hunt':

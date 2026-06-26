@@ -45,26 +45,57 @@ def _casefold_filter(value: str) -> str:
 
 
 def _filter_profile_for(case: dict) -> dict | None:
-    if case.get("filter_kind") != "naive_common":
-        return None
+    if case.get("filter_kind") == "naive_common":
+        return {
+            "blocked_tokens": ["<script", "</script", "javascript:", "onerror", "srcdoc", "expression("],
+            "allowed_tokens": ["svg", "details", "ontoggle", "onbegin", "onfocus"],
+            "normalization_behavior": ["case_normalized"],
+            "waf_detected": False,
+            "sanitizer_detected": True,
+            "csp_rules": {
+                "allow_inline_scripts": True,
+                "allow_event_handlers": True,
+                "allow_javascript_urls": False,
+            },
+        }
 
-    return {
-        "blocked_tokens": ["<script", "</script", "javascript:", "onerror", "srcdoc", "expression("],
-        "allowed_tokens": ["svg", "details", "ontoggle", "onbegin", "onfocus"],
-        "normalization_behavior": ["case_normalized"],
-        "waf_detected": False,
-        "sanitizer_detected": True,
-        "csp_rules": {
-            "allow_inline_scripts": True,
-            "allow_event_handlers": True,
-            "allow_javascript_urls": False,
-        },
-    }
+    if case.get("filter_kind") == "strict_keywords_and_symbols":
+        return {
+            "blocked_tokens": ["script", "onerror", "onload", "javascript", "(", ")", "'", "\""],
+            "allowed_tokens": ["svg", "animate", "onbegin", "onpointerenter"],
+            "normalization_behavior": [],
+            "waf_detected": False,
+            "sanitizer_detected": True,
+            "csp_rules": {
+                "allow_inline_scripts": True,
+                "allow_event_handlers": True,
+                "allow_javascript_urls": False,
+            },
+            "probe_results": [
+                {"probe_name": "char_(", "payload": "xss(xss", "blocked": True, "escaped": False, "stripped": True, "reflected": False},
+                {"probe_name": "char_)", "payload": "xss)xss", "blocked": True, "escaped": False, "stripped": True, "reflected": False},
+                {"probe_name": "char_'", "payload": "xss'xss", "blocked": True, "escaped": False, "stripped": True, "reflected": False},
+                {"probe_name": "char_\"", "payload": "xss\"xss", "blocked": True, "escaped": False, "stripped": True, "reflected": False},
+                {"probe_name": "char_`", "payload": "xss`xss", "blocked": False, "escaped": False, "stripped": False, "reflected": True},
+            ]
+        }
+
+    return None
+
+
+def _strict_filter(value: str) -> str:
+    blocked = ["script", "onerror", "onload", "javascript", "(", ")", "'", "\""]
+    filtered = value
+    for token in blocked:
+        filtered = re.sub(re.escape(token), "", filtered, flags=re.IGNORECASE)
+    return filtered
 
 
 def _apply_case_filter(case: dict, payload: str) -> str:
     if case.get("filter_kind") == "naive_common":
         return _casefold_filter(payload)
+    if case.get("filter_kind") == "strict_keywords_and_symbols":
+        return _strict_filter(payload)
     return payload
 
 
@@ -223,8 +254,6 @@ def run_e2e(base_url: str, oracle_port: int, include_controls: bool, reset: bool
         print("")
 
         for case in manifest["cases"]:
-            if case["slug"] != "html_raw":
-                continue
             if not case["expected_vulnerable"] and not include_controls:
                 continue
 

