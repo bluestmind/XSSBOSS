@@ -6,7 +6,7 @@ class MXSSSimulator:
 
     @staticmethod
     def parse_to_tree(html: str) -> List[Dict[str, Any]]:
-        """Parses a simplified HTML/SVG structure into a node tree to simulate browser parsing."""
+        """Parses a stateful HTML/SVG structure into a node tree simulating browser CDATA/RAWTEXT transitions."""
         # Regex matching tags, comments, or text
         pattern = re.compile(r'(<!--.*?-->|<[^>]+>|[^<]+)', re.DOTALL)
         tokens = pattern.findall(html)
@@ -16,12 +16,19 @@ class MXSSSimulator:
         
         current_namespace = "html"
         
+        # HTML5 parsing rawtext/rcdata states
+        rcdata_tags = {"title", "textarea"}
+        rawtext_tags = {"style", "xmp", "iframe", "noembed", "noframes", "noscript"}
+        
+        text_mode = None  # can be 'rawtext', 'rcdata', or 'plaintext'
+        text_mode_tag = None
+        
         for token in tokens:
             token = token.strip()
             if not token:
                 continue
                 
-            if token.startswith("<!--"):
+            if token.startswith("<!--") and text_mode is None:
                 continue
                 
             if token.startswith("<") and token.endswith(">"):
@@ -31,6 +38,28 @@ class MXSSSimulator:
                 # Extract tag name
                 tag_parts = tag_content.split()
                 tag_name = tag_parts[0].lower() if tag_parts else ""
+                
+                # If we are in rawtext/rcdata mode, ignore all tags except the closing trigger tag
+                if text_mode is not None:
+                    if is_closing and tag_name == text_mode_tag:
+                        # Exit text mode
+                        text_mode = None
+                        text_mode_tag = None
+                        if stack and stack[-1]["tag"] == tag_name:
+                            stack.pop()
+                            current_namespace = stack[-1]["namespace"] if stack else "html"
+                    else:
+                        # Treat tag as raw text inside CDATA/RCDATA parent
+                        node = {
+                            "tag": "#text",
+                            "namespace": current_namespace,
+                            "text": token
+                        }
+                        if stack:
+                            stack[-1]["children"].append(node)
+                        else:
+                            tree.append(node)
+                    continue
                 
                 if is_closing:
                     # Pop from stack to match tag name
@@ -55,6 +84,17 @@ class MXSSSimulator:
                         stack[-1]["children"].append(node)
                     else:
                         tree.append(node)
+                        
+                    # Handle rawtext / rcdata / plaintext state triggers
+                    if tag_name in rawtext_tags:
+                        text_mode = "rawtext"
+                        text_mode_tag = tag_name
+                    elif tag_name in rcdata_tags:
+                        text_mode = "rcdata"
+                        text_mode_tag = tag_name
+                    elif tag_name == "plaintext":
+                        text_mode = "plaintext"
+                        text_mode_tag = "plaintext"
                         
                     # Self-closing tags do not push to stack
                     if not token.endswith("/>") and tag_name not in ["img", "br", "hr", "input", "meta", "link"]:
