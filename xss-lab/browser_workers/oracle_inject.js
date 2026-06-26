@@ -236,6 +236,34 @@
                 enumerable: true
             });
         });
+
+        // Next-Gen Telemetry: Hook Object.defineProperty/defineProperties to capture bypasses
+        const originalDefineProperty = Object.defineProperty;
+        Object.defineProperty = function(obj, prop, descriptor) {
+            if ((obj === Object.prototype || obj === Array.prototype) && descriptor) {
+                let val = descriptor.value;
+                if (val && typeof val === 'string' && val.includes(token)) {
+                    __XSS__('PrototypePollutionDefineProperty:' + prop, val, new Error().stack);
+                }
+            }
+            return originalDefineProperty.call(Object, obj, prop, descriptor);
+        };
+
+        const originalDefineProperties = Object.defineProperties;
+        Object.defineProperties = function(obj, properties) {
+            if ((obj === Object.prototype || obj === Array.prototype) && properties) {
+                for (let prop in properties) {
+                    let descriptor = properties[prop];
+                    if (descriptor) {
+                        let val = descriptor.value;
+                        if (val && typeof val === 'string' && val.includes(token)) {
+                            __XSS__('PrototypePollutionDefineProperties:' + prop, val, new Error().stack);
+                        }
+                    }
+                }
+            }
+            return originalDefineProperties.call(Object, obj, properties);
+        };
     } catch (err) {
         console.error('XSS Oracle: Failed to setup Prototype Pollution hooks', err);
     }
