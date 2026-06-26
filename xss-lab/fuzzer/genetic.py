@@ -261,6 +261,17 @@ class GeneticBreeder:
             # Avoid direct script tags, favor namespaced or nested formats
             techniques.append(lambda p: MutationEngine.apply_tag_nesting(p))
             techniques.append(lambda p: random.choice(MutationEngine.apply_mxss_nesting(p)))
+            from fuzzer.constraint_solver import TransformationConstraintSolver
+            techniques.append(lambda p: TransformationConstraintSolver.solve_nested_replacement(p, "script"))
+            
+        if any('onerror' in w for w in blocked_words):
+            from fuzzer.constraint_solver import TransformationConstraintSolver
+            techniques.append(lambda p: TransformationConstraintSolver.solve_nested_replacement(p, "onerror"))
+
+        blocked_chars = taint_rules.get('blocked_chars', [])
+        if any(c in blocked_chars for c in ['<', '>', '"', "'"]):
+            from fuzzer.constraint_solver import TransformationConstraintSolver
+            techniques.append(lambda p: TransformationConstraintSolver.solve_sequence(p, ["unicode_normalize"]))
             
         # Adaptive Router Weighting
         if is_waf_active:
