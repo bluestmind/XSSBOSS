@@ -209,6 +209,13 @@ class PayloadGenerator:
         import json
         import shutil
         
+        # Auto-repair syntactic breaks before validating to preserve mutated candidates
+        try:
+            from fuzzer.genetic import GeneticBreeder
+            payloads = [GeneticBreeder.auto_repair_payload_syntax(p) for p in payloads]
+        except Exception:
+            pass
+            
         # Check if node is installed and in path
         if not shutil.which('node'):
             return payloads
