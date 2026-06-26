@@ -169,13 +169,18 @@ class FitnessScorer:
             # Strip tokens to compare structure
             clean_payload = test_case.payload.replace(test_case.token, "")
             clean_dom = execution.dom_snapshot.replace(test_case.token, "")
+            
+            # Use advanced DOM token sequence alignment and similarity
+            from fuzzer.sequence_alignment import DOMSequenceAligner
+            similarity = DOMSequenceAligner.calculate_similarity(clean_payload, clean_dom)
+            
             # If browser modified the markup structure (mXSS indicator)
             # e.g., if annotation-xml or SVG namespaces are rewritten/parsed
             if any(marker in clean_dom.lower() for marker in ["<math", "<svg", "<annotation-xml", "<noscript"]) and not any(marker in clean_payload.lower() for marker in ["<math", "<svg", "<annotation-xml", "<noscript"]):
                 score += 30.0  # High bonus for triggering parser-differential!
-            elif clean_payload != clean_dom and len(clean_payload) != len(clean_dom):
-                # Structural length mismatch indicating parser sanitization or modification
-                score += 15.0
+            elif similarity < 0.95:
+                # Structural difference indicating parser modification/sanitization or potential mXSS bypass
+                score += (1.0 - similarity) * 40.0
 
         return min(95.0, score)  # Cap non-verified runs at 95.0
 
