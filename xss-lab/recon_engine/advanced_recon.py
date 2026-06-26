@@ -113,6 +113,8 @@ class AdvancedRecon:
         ]
         
         mined_params = set()
+        # Collect non-JS HTML endpoints to extract inline script contents
+        html_endpoints = [ep for ep in endpoints if not ep.url_pattern.split("?")[0].endswith(".js")]
         
         # Concurrent script content fetching
         import concurrent.futures
@@ -130,11 +132,34 @@ class AdvancedRecon:
                 logger.debug(f"[Advanced Recon] Could not scrape script {js_url}: {js_err}")
                 return js_url, ""
                 
+        def fetch_html_inline_scripts(html_url):
+            try:
+                full_html_url = urllib.parse.urljoin(base_url, html_url)
+                req = urllib.request.Request(
+                    full_html_url,
+                    headers={"User-Agent": "XSSBoss-Recon/1.0"}
+                )
+                with urllib.request.urlopen(req, timeout=3.0) as response:
+                    html_content = response.read().decode("utf-8", errors="ignore")
+                    # Extract inline scripts (ignoring scripts with src attributes)
+                    inline_scripts = re.findall(r'<script(?![^>]*\bsrc\b)[^>]*>(.*?)</script>', html_content, flags=re.IGNORECASE | re.DOTALL)
+                    return html_url, "\n".join(inline_scripts)
+            except Exception as html_err:
+                logger.debug(f"[Advanced Recon] Could not scrape HTML {html_url}: {html_err}")
+                return html_url, ""
+                
         js_list = list(js_files)[:20]  # Limit to 20 JS files max
+        html_list = [ep.url_pattern for ep in html_endpoints][:15] # Limit to 15 HTML files max
+        
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
             future_to_url = {executor.submit(fetch_script_content, url): url for url in js_list}
-            for future in concurrent.futures.as_completed(future_to_url):
-                js_url, content = future.result()
+            future_to_html = {executor.submit(fetch_html_inline_scripts, url): url for url in html_list}
+            
+            # Combine both futures
+            all_futures = {**future_to_url, **future_to_html}
+            
+            for future in concurrent.futures.as_completed(all_futures):
+                resource_url, content = future.result()
                 if not content:
                     continue
                 try:
@@ -154,7 +179,7 @@ class AdvancedRecon:
                                 if sp and len(sp) > 1 and sp not in ["true", "false", "null", "undefined"]:
                                     mined_params.add(sp)
                 except Exception as parse_err:
-                    logger.debug(f"[Advanced Recon] Failed parsing js content from {js_url}: {parse_err}")
+                    logger.debug(f"[Advanced Recon] Failed parsing resource content from {resource_url}: {parse_err}")
                 
         # Register mined custom parameters to all target GET endpoints (excluding JS files themselves)
         if mined_params:
