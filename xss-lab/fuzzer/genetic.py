@@ -825,7 +825,7 @@ class GeneticEvolutionEngine:
             if action:
                 # If fitness is >= 40.0, count as bandit success
                 success = fitness >= 40.0
-                bandit.update(action, success)
+                bandit.update(action, success, context=context_str)
 
         # Next-Gen Reinforcement: Update Q-Learning Table rewards
         q_opt = cls._get_q_optimizer()
@@ -975,7 +975,7 @@ class GeneticEvolutionEngine:
 
         bandit = GeneticEvolutionEngine._get_bandit_selector()
         while len(next_gen_payloads) < population_size:
-            action = bandit.select_action()
+            action = bandit.select_action(context=context_str)
             
             if action == 'llm_guided' and llm_payloads:
                 # Pick a random LLM suggestion
