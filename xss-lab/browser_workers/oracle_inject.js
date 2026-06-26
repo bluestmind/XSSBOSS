@@ -327,6 +327,7 @@
         }
         return originalAddEventListener.call(this, type, listener, options);
     };
+    window.__registerOracleHook__(EventTarget.prototype.addEventListener, originalAddEventListener, 'addEventListener');
 
     EventTarget.prototype.removeEventListener = function(type, listener, options) {
         if (type === 'message' && listener && messageListenerWrappers.has(listener)) {
@@ -334,6 +335,7 @@
         }
         return originalRemoveEventListener.call(this, type, listener, options);
     };
+    window.__registerOracleHook__(EventTarget.prototype.removeEventListener, originalRemoveEventListener, 'removeEventListener');
 
     const originalOnMessage = Object.getOwnPropertyDescriptor(Window.prototype, 'onmessage');
     if (originalOnMessage && originalOnMessage.set) {
@@ -395,6 +397,7 @@
         }
         return originalEval.call(this, code);
     };
+    window.__registerOracleHook__(window.eval, originalEval, 'eval');
     
     // Hook Function constructor
     const originalFunction = window.Function;
@@ -405,6 +408,7 @@
         }
         return originalFunction.apply(this, args);
     };
+    window.__registerOracleHook__(window.Function, originalFunction, 'Function');
     
     // Hook setTimeout with string argument
     const originalSetTimeout = window.setTimeout;
@@ -2629,8 +2633,10 @@
                 } else {
                     wrappedRules.createScriptURL = (url) => url;
                 }
-                return originalCreatePolicy.call(window.trustedTypes, name, wrappedRules);
+                const policy = originalCreatePolicy.call(window.trustedTypes, name, wrappedRules);
+                return policy;
             };
+            window.__registerOracleHook__(window.trustedTypes.createPolicy, originalCreatePolicy, 'createPolicy');
         }
     } catch (err) {
         console.error('XSS Oracle: Failed to setup Trusted Types hooks', err);
