@@ -80,6 +80,32 @@ def _filter_profile_for(case: dict) -> dict | None:
             ]
         }
 
+    if case.get("filter_kind") == "extreme_boss_filter":
+        return {
+            "blocked_tokens": [
+                "script", "iframe", "img", "onerror", "onload", "onbegin", "onfocus",
+                "onmouseover", "javascript", "srcdoc", "eval", "setTimeout", "Function",
+                "(", ")", "'", "\"", "`", "/", "\\"
+            ],
+            "allowed_tokens": ["a", "id", "name", "href", "config", "url", "parent", "xss"],
+            "normalization_behavior": [],
+            "waf_detected": False,
+            "sanitizer_detected": True,
+            "csp_rules": {
+                "allow_inline_scripts": True,
+                "allow_event_handlers": True,
+                "allow_javascript_urls": False,
+            },
+            "probe_results": [
+                {"probe_name": "char_(", "payload": "xss(xss", "blocked": True, "escaped": False, "stripped": True, "reflected": False},
+                {"probe_name": "char_)", "payload": "xss)xss", "blocked": True, "escaped": False, "stripped": True, "reflected": False},
+                {"probe_name": "char_'", "payload": "xss'xss", "blocked": True, "escaped": False, "stripped": True, "reflected": False},
+                {"probe_name": "char_\"", "payload": "xss\"xss", "blocked": True, "escaped": False, "stripped": True, "reflected": False},
+                {"probe_name": "char_`", "payload": "xss`xss", "blocked": True, "escaped": False, "stripped": True, "reflected": False},
+                {"probe_name": "char_/", "payload": "xss/xss", "blocked": True, "escaped": False, "stripped": True, "reflected": False},
+            ]
+        }
+
     return None
 
 
@@ -91,11 +117,29 @@ def _strict_filter(value: str) -> str:
     return filtered
 
 
+def _boss_filter(value: str) -> str:
+    blocked_tokens = [
+        "script", "iframe", "img", "onerror", "onload", "onbegin", "onfocus",
+        "onmouseover", "javascript", "srcdoc", "eval", "setTimeout", "Function",
+        "(", ")", "'", "\"", "`", "/", "\\"
+    ]
+    filtered = value
+    while True:
+        original = filtered
+        for token in blocked_tokens:
+            filtered = re.sub(re.escape(token), "", filtered, flags=re.IGNORECASE)
+        if filtered == original:
+            break
+    return filtered
+
+
 def _apply_case_filter(case: dict, payload: str) -> str:
     if case.get("filter_kind") == "naive_common":
         return _casefold_filter(payload)
     if case.get("filter_kind") == "strict_keywords_and_symbols":
         return _strict_filter(payload)
+    if case.get("filter_kind") == "extreme_boss_filter":
+        return _boss_filter(payload)
     return payload
 
 

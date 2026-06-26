@@ -87,6 +87,7 @@ def index():
         ("POST", "/hard/post-json message=", "JSON body reflection"),
         ("GET", "/hard/safe-html?q=", "escaped safe control"),
         ("GET", "/hard/safe-js?term=", "JS encoded safe control"),
+        ("GET", "/hard/ultimate-boss?q=", "Ultimate Boss Case: The Hardest XSS on Earth"),
     ]
     items = "\n".join(
         f"<li><code>{method} {html.escape(path)}</code> - {html.escape(desc)}</li>"
@@ -493,6 +494,50 @@ def hard_reset_state():
     global stored_db
     stored_db = {"message": "Hello"}
     return JSONResponse({"status": "success", "message": "State reset successfully"})
+
+
+@app.get("/hard/ultimate-boss")
+def hard_ultimate_boss(q: str = Query("")):
+    """The Ultimate Boss Level: The Hardest XSS on Earth.
+    Bypassed using DOM Clobbering + HTML Entity Obfuscated Scheme.
+    """
+    blocked_tokens = [
+        "script", "iframe", "img", "onerror", "onload", "onbegin", "onfocus",
+        "onmouseover", "javascript", "srcdoc", "eval", "setTimeout", "Function",
+        "(", ")", "'", "\"", "`", "/", "\\"
+    ]
+    
+    # Recursive validation stripping loop to defeat simple nesting bypasses
+    filtered = q
+    while True:
+        original = filtered
+        for token in blocked_tokens:
+            filtered = re.sub(re.escape(token), "", filtered, flags=re.IGNORECASE)
+        if filtered == original:
+            break
+            
+    return _page(
+        "Ultimate Boss Case: The Hardest XSS on Earth",
+        f"""
+<div class="box">
+  <p>Your input (heavily filtered):</p>
+  <div id="boss-reflection">{filtered}</div>
+</div>
+
+<script>
+  // Safe-looking setup
+  window.config = window.config || {{ url: "/static/default.html" }};
+  
+  setTimeout(function() {{
+      if (window.config && window.config.url) {{
+          var f = document.createElement('iframe');
+          f.src = window.config.url;
+          document.body.appendChild(f);
+      }}
+  }}, 100);
+</script>
+""",
+    )
 
 
 if __name__ == "__main__":

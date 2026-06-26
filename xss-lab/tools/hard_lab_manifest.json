@@ -227,6 +227,19 @@
         {"action": "wait", "seconds": 0.5}
       ],
       "smoke_any": ["<img src=x onerror=alert(1)>", "<svg onload=alert(1)>"]
+    },
+    {
+      "slug": "ultimate_boss",
+      "name": "Ultimate Boss Case: The Hardest XSS on Earth",
+      "method": "GET",
+      "path": "/hard/ultimate-boss",
+      "param_name": "q",
+      "param_location": "query",
+      "context_type": "HTML_TEXT",
+      "strategy": "unicode_hunt",
+      "expected_vulnerable": true,
+      "filter_kind": "extreme_boss_filter",
+      "smoke_any": ["config", "url", "href", "parent", "xss"]
     }
   ],
   "experiments": [
