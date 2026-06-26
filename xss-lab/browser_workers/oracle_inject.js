@@ -28,6 +28,26 @@
         'postMessage': '__taint_postmsg__'
     };
 
+    function resolveDynamicInsertionContext(element) {
+        if (!element || !(element instanceof Node)) {
+            return 'HTML_TEXT';
+        }
+        try {
+            let current = element;
+            while (current) {
+                const tagName = (current.tagName || '').toUpperCase();
+                if (tagName === 'SCRIPT') return 'JS_STRING_LITERAL';
+                if (tagName === 'STYLE') return 'CSS_STYLE';
+                if (tagName === 'NOSCRIPT') return 'NOSCRIPT';
+                if (tagName === 'TEMPLATE') return 'TEMPLATE';
+                if (tagName === 'TEXTAREA') return 'TEXTAREA';
+                if (tagName === 'IFRAME') return 'IFRAME';
+                current = current.parentNode;
+            }
+        } catch (e) {}
+        return 'HTML_TEXT';
+    }
+
     window.__XSS__ = function(sinkType, value, errorStack) {
         if (Array.isArray(sinkType)) {
             const strings = sinkType;
@@ -207,6 +227,25 @@
     } catch (err) {
         console.error('XSS Oracle: Failed to setup Prototype Pollution hooks', err);
     }
+
+    // Active Sanitizer Fingerprinting: Hook window.DOMPurify loading
+    try {
+        let purifyVal = window.DOMPurify;
+        if (purifyVal && purifyVal.version) {
+            console.warn('[TaintFlow] DOMPurify version detected: ' + purifyVal.version);
+        }
+        Object.defineProperty(window, 'DOMPurify', {
+            get: function() { return purifyVal; },
+            set: function(val) {
+                purifyVal = val;
+                if (val && val.version) {
+                    console.warn('[TaintFlow] DOMPurify version detected: ' + val.version);
+                }
+            },
+            configurable: true,
+            enumerable: true
+        });
+    } catch (e) {}
 
     // Hook RegExp and String matching methods to extract active frontend filtering rules
     try {
@@ -606,7 +645,8 @@
         Object.defineProperty(Element.prototype, 'innerHTML', {
             set: function(value) {
                 if (typeof value === 'string' && value.includes(token)) {
-                    __XSS__('innerHTML', value, new Error().stack);
+                    const ctx = resolveDynamicInsertionContext(this);
+                    __XSS__('innerHTML [ResolvedContext: ' + ctx + ']', value, new Error().stack);
                 }
                 originalInnerHTML.set.call(this, value);
             },
@@ -620,7 +660,8 @@
         Object.defineProperty(Element.prototype, 'outerHTML', {
             set: function(value) {
                 if (typeof value === 'string' && value.includes(token)) {
-                    __XSS__('outerHTML', value, new Error().stack);
+                    const ctx = resolveDynamicInsertionContext(this);
+                    __XSS__('outerHTML [ResolvedContext: ' + ctx + ']', value, new Error().stack);
                 }
                 originalOuterHTML.set.call(this, value);
             },
@@ -632,7 +673,8 @@
     const originalInsertAdjacentHTML = Element.prototype.insertAdjacentHTML;
     Element.prototype.insertAdjacentHTML = function(position, html) {
         if (typeof html === 'string' && html.includes(token)) {
-            __XSS__('insertAdjacentHTML', html, new Error().stack);
+            const ctx = resolveDynamicInsertionContext(this);
+            __XSS__('insertAdjacentHTML [ResolvedContext: ' + ctx + ']', html, new Error().stack);
         }
         return originalInsertAdjacentHTML.call(this, position, html);
     };
@@ -665,7 +707,8 @@
             Object.defineProperty(proto, propertyName, {
                 set: function(value) {
                     if (typeof value === 'string' && value.includes(token)) {
-                        __XSS__(sinkName, value, new Error().stack);
+                        const ctx = resolveDynamicInsertionContext(this);
+                        __XSS__(sinkName + ' [ResolvedContext: ' + ctx + ']', value, new Error().stack);
                     }
                     descriptor.set.call(this, value);
                 },
@@ -679,7 +722,8 @@
         const original = proto[methodName];
         proto[methodName] = function(markup, ...args) {
             if (typeof markup === 'string' && markup.includes(token)) {
-                __XSS__(sinkName, markup, new Error().stack);
+                const ctx = resolveDynamicInsertionContext(this);
+                __XSS__(sinkName + ' [ResolvedContext: ' + ctx + ']', markup, new Error().stack);
             }
             return original.call(this, markup, ...args);
         };
@@ -695,7 +739,13 @@
     const originalSetAttribute = Element.prototype.setAttribute;
     Element.prototype.setAttribute = function(name, value) {
         if (typeof value === 'string' && value.includes(token)) {
-            __XSS__('setAttribute.' + name, value, new Error().stack);
+            let ctx = 'ATTR_QUOTED';
+            if (name.toLowerCase().startsWith('on')) {
+                ctx = 'EVENT_HANDLER_ATTR';
+            } else if (name.toLowerCase() === 'src' || name.toLowerCase() === 'href') {
+                ctx = 'URL_QUERY';
+            }
+            __XSS__('setAttribute.' + name + ' [ResolvedContext: ' + ctx + ']', value, new Error().stack);
         }
         return originalSetAttribute.call(this, name, value);
     };

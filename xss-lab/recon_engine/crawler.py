@@ -45,6 +45,34 @@ class Crawler:
                 self.driver = webdriver.Chrome(service=service, options=options)
             except Exception as e:
                 raise RuntimeError(f"Failed to initialize Selenium Chrome webdriver: {e}")
+        
+        # Inject SPA routing hooks via Chrome DevTools Protocol
+        try:
+            self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
+                'source': """
+                    window._spa_routes = window._spa_routes || [];
+                    const origPush = history.pushState;
+                    history.pushState = function(state, title, url) {
+                        if (url) {
+                            window._spa_routes.push(new URL(url, location.href).href);
+                        }
+                        return origPush.apply(this, arguments);
+                    };
+                    const origReplace = history.replaceState;
+                    history.replaceState = function(state, title, url) {
+                        if (url) {
+                            window._spa_routes.push(new URL(url, location.href).href);
+                        }
+                        return origReplace.apply(this, arguments);
+                    };
+                    window.addEventListener('hashchange', function() {
+                        window._spa_routes.push(location.href);
+                    });
+                """
+            })
+        except Exception as e:
+            print(f"[-] Crawler: failed to inject SPA router hooks: {e}")
+
         self.driver.set_page_load_timeout(SeleniumConfig.NAVIGATION_TIMEOUT)
         self.driver.implicitly_wait(SeleniumConfig.ACTION_TIMEOUT)
         
@@ -141,6 +169,31 @@ class Crawler:
                 except Exception:
                     continue
                     
+            # Interactive SPA State-Space Auditing (Click buttons/interactive elements to trigger history changes)
+            try:
+                interactive_elements = self.driver.find_elements(By.CSS_SELECTOR, "button, [role='button'], input[type='button']")
+                original_page_url = self.driver.current_url
+                for element in interactive_elements[:15]:
+                    try:
+                        element.click()
+                        time.sleep(0.1)
+                        if self.driver.current_url != original_page_url:
+                            self.driver.execute_script("window.history.back();")
+                            time.sleep(0.1)
+                    except Exception:
+                        continue
+            except Exception as e:
+                print(f"Error executing interactive SPA crawling: {e}")
+
+            # Extract client-side SPA routes from CDP telemetry
+            try:
+                spa_routes = self.driver.execute_script("return window._spa_routes || [];")
+                for r in spa_routes:
+                    if r and r not in hrefs:
+                        hrefs.append(r)
+            except Exception as e:
+                print(f"Error fetching SPA routes: {e}")
+
             # Extract scripts (for advanced JS routes / parameters discovery)
             scripts = self.driver.find_elements(By.TAG_NAME, "script")
             for script in scripts:

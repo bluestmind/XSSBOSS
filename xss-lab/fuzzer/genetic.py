@@ -18,6 +18,8 @@ def extract_taint_flow_rules(telemetry: Dict[str, Any]) -> Dict[str, Any]:
         'blocked_words': set(),
         'force_lowercase': False,
         'force_uppercase': False,
+        'sanitizer_detected': False,
+        'sanitizer_version': None,
     }
     
     console_logs = telemetry.get('console', [])
@@ -79,7 +81,13 @@ def extract_taint_flow_rules(telemetry: Dict[str, Any]) -> Dict[str, Any]:
                     for w in words:
                         if w and len(w) > 2:
                             rules['blocked_words'].add(w.lower())
-                            
+            elif 'DOMPurify version detected' in text:
+                rules['sanitizer_detected'] = True
+                parts = text.split('detected:')
+                if len(parts) > 1:
+                    rules['sanitizer_version'] = parts[1].strip()
+            elif 'Sanitizer library detected' in text:
+                rules['sanitizer_detected'] = True
                 
     # Convert sets to lists for JSON serialization compatibility
     rules['blocked_chars'] = list(rules['blocked_chars'])
@@ -215,14 +223,16 @@ class GeneticBreeder:
         is_csp_active = False
         is_sanitizer_active = False
         tech_stack = {}
+        taint_rules = {}
         
         if filter_profile:
             tech_stack = filter_profile.get('tech_stack', {}) or {}
+            taint_rules = filter_profile.get('taint_flow_rules', {}) or {}
             if filter_profile.get('waf_detected') or 'waf' in str(filter_profile).lower():
                 is_waf_active = True
             if filter_profile.get('csp_rules') or filter_profile.get('csp_detected') or 'csp' in str(filter_profile).lower():
                 is_csp_active = True
-            if filter_profile.get('sanitizer_detected') or 'sanitizer' in str(filter_profile).lower():
+            if filter_profile.get('sanitizer_detected') or 'sanitizer' in str(filter_profile).lower() or taint_rules.get('sanitizer_detected'):
                 is_sanitizer_active = True
         
         # Core safe mutations pool
@@ -238,7 +248,7 @@ class GeneticBreeder:
         techniques = []
         
         # Parse runtime string TaintFlow telemetry rules
-        taint_rules = filter_profile.get('taint_flow_rules', {}) if filter_profile else {}
+        # (loaded in filter_profile block above)
         
         # Adjust obfuscations and mutations dynamically based on TaintFlow logs
         if ' ' in taint_rules.get('blocked_chars', []):
