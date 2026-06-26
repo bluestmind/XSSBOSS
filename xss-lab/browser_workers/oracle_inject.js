@@ -204,7 +204,19 @@
 
     // Hook: Object.prototype properties for Prototype Pollution write & read detection
     try {
-        const gadgetProperties = ["html", "onload", "src", "url", "href", "sourceURL", "content", "jquery"];
+        const gadgetProperties = [
+            // HTML / Script injection gadgets
+            "html", "onload", "src", "url", "href", "sourceURL", "content", "jquery",
+            "sourceMapURL", "innerHTML", "outerHTML", "iframe", "srcdoc", "tagName",
+            // Template / Framework gadgets
+            "template", "templateUrl", "view", "render", "compile", "interpolate",
+            // Configuration / Option gadgets
+            "config", "options", "settings", "setup", "env", "theme", "context",
+            // Common library gadgets
+            "data", "attrs", "props", "params", "headers", "transport", "fallback",
+            "prefix", "suffix", "delimiter", "namespace", "callback", "sanitize",
+            "allowedTags", "allowedAttributes", "hooks", "plugins"
+        ];
         gadgetProperties.forEach(prop => {
             let val = undefined;
             Object.defineProperty(Object.prototype, prop, {
