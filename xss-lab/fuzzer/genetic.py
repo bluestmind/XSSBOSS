@@ -557,9 +557,29 @@ class GeneticBreeder:
         # Resolve target DOM context type (defaults to 'HTML_TEXT')
         context_str = filter_profile.get('context_type', 'HTML_TEXT') if filter_profile else 'HTML_TEXT'
         
-        # Pick optimal mutation class category using Q-Learning policy
+        # Calculate policy probabilities from Q-table using Boltzmann Softmax (T=10.0)
         q_opt = GeneticEvolutionEngine._get_q_optimizer()
-        action_class = q_opt.select_action(context_str)
+        q_values = [q_opt.get_q_value(context_str, act) for act in q_opt.actions]
+        # Shift values to avoid overflow
+        max_q = max(q_values)
+        exps = [math.exp((q - max_q) / 10.0) for q in q_values]
+        sum_exps = sum(exps)
+        p_qtable = [e / sum_exps for e in exps] if sum_exps > 0 else [1.0/len(q_values)]*len(q_values)
+        
+        # Get global measurement probabilities from Quantum Qubits
+        q_gate = GeneticEvolutionEngine._get_quantum_optimizer()
+        p_quantum = q_gate.get_probabilities()
+        
+        # Entangled State-Action selection: P_final(a) = P_qtable(a) * P_quantum(a)
+        combined_weights = []
+        for idx, act in enumerate(q_opt.actions):
+            combined_weights.append(p_qtable[idx] * p_quantum.get(act, 0.5))
+            
+        sum_weights = sum(combined_weights)
+        if sum_weights > 0:
+            action_class = random.choices(q_opt.actions, weights=combined_weights, k=1)[0]
+        else:
+            action_class = q_opt.select_action(context_str)
         
         # Apply the context-optimized mutation class category
         try:
@@ -689,8 +709,21 @@ class GeneticEvolutionEngine:
 
     _bandit_selector = None
     _q_optimizer = None
+    _quantum_optimizer = None
     _token_action_history = {}
     _context_action_history = {}
+
+    @classmethod
+    def _get_quantum_optimizer(cls):
+        if cls._quantum_optimizer is None:
+            from fuzzer.quantum_gate import QuantumGateOptimizer
+            actions = [
+                'obfuscate_case', 'obfuscate_whitespace', 'obfuscate_escapes',
+                'bypass_csp', 'bypass_mxss', 'bypass_dom_clobbering', 
+                'bypass_prototype_pollution', 'solve_constraints'
+            ]
+            cls._quantum_optimizer = QuantumGateOptimizer(actions)
+        return cls._quantum_optimizer
 
     @classmethod
     def _get_bandit_selector(cls):
@@ -795,6 +828,15 @@ class GeneticEvolutionEngine:
             if history:
                 state, action = history
                 q_opt.update_q_value(state, action, state, fitness)
+
+        # Next-Gen Reinforcement: Apply Quantum Rotation Gates to update qubit amplitudes
+        q_gate = cls._get_quantum_optimizer()
+        avg_fitness = sum(fit for _, fit in scored_population) / len(scored_population) if scored_population else 0.0
+        for case, fitness in scored_population:
+            history = cls._context_action_history.get(case.payload)
+            if history:
+                _, action = history
+                q_gate.apply_rotation_gate(action, fitness, avg_fitness)
 
         # Automatically detect and flag CSP constraints from runtime telemetry (securitypolicyviolation)
         triggered_csp = False
