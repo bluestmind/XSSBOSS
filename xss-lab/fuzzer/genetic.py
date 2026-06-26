@@ -274,6 +274,7 @@ class GeneticBreeder:
             # CSP present -> prioritize bypass CDNs, Angular templates, template tag calls
             techniques.append(lambda p: random.choice(MutationEngine.apply_csp_bypass_cdn(p)))
             techniques.append(lambda p: random.choice(MutationEngine.apply_csp_bypass_angular(p)))
+            techniques.append(lambda p: random.choice(MutationEngine.apply_framework_directives(p)))
             techniques.append(lambda p: random.choice(MutationEngine.apply_template_tag_calls(p)))
             techniques.append(lambda p: random.choice(MutationEngine.apply_dom_clobbering(p)))
             techniques.append(lambda p: random.choice(MutationEngine.apply_prototype_pollution(p)))
@@ -283,6 +284,7 @@ class GeneticBreeder:
             # Sanitizer present -> prioritize mXSS parser differential bypasses
             techniques.append(lambda p: random.choice(MutationEngine.apply_mxss_nesting(p)))
             techniques.append(lambda p: random.choice(MutationEngine.apply_mxss_namespaced(p)))
+            techniques.append(lambda p: random.choice(MutationEngine.apply_framework_directives(p)))
             techniques.append(lambda p: random.choice(MutationEngine.apply_dom_clobbering(p)))
             techniques.append(lambda p: random.choice(MutationEngine.apply_prototype_pollution(p)))
             techniques.append(lambda p: random.choice(MutationEngine.apply_some_taint_theft(p)))
@@ -291,6 +293,7 @@ class GeneticBreeder:
             # General fallback
             techniques.append(lambda p: random.choice(MutationEngine.apply_csp_bypass_cdn(p)))
             techniques.append(lambda p: random.choice(MutationEngine.apply_csp_bypass_angular(p)))
+            techniques.append(lambda p: random.choice(MutationEngine.apply_framework_directives(p)))
             techniques.append(lambda p: random.choice(MutationEngine.apply_mxss_nesting(p)))
             techniques.append(lambda p: random.choice(MutationEngine.apply_mxss_namespaced(p)))
             techniques.append(lambda p: random.choice(MutationEngine.apply_dom_clobbering(p)))

