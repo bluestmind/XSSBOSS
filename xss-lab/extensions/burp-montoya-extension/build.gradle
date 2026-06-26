@@ -1,0 +1,35 @@
+plugins {
+    id 'java'
+}
+
+group 'com.xssboss'
+version '1.0.0'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // PortSwigger Montoya API dependency
+    compileOnly 'net.portswigger.burp.extensions:montoya-api:2023.12.1'
+    
+    // JSON library for payloads
+    implementation 'com.google.code.gson:gson:2.10.1'
+}
+
+jar {
+    // Include all dependency classes inside fat jar so it loads seamlessly in Burp
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    
+    manifest {
+        attributes(
+            'Extension-Class': 'com.xssboss.extension.XssBossExtension',
+            'Extension-Name': 'XSS Boss Connector',
+            'Extension-Version': '1.0.0',
+            'Extension-Description': 'Real-time proxy request sync with XSS Boss'
+        )
+    }
+}

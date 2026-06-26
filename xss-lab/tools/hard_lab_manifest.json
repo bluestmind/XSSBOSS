@@ -1,0 +1,238 @@
+{
+  "target": {
+    "name": "Hard Local XSS Lab",
+    "base_url": "http://127.0.0.1:8099",
+    "bounty_platform": "local-lab",
+    "scope_tags": {
+      "in_scope": ["127.0.0.1", "localhost"],
+      "out_of_scope": []
+    }
+  },
+  "cases": [
+    {
+      "slug": "html_raw",
+      "name": "Raw HTML reflection",
+      "method": "GET",
+      "path": "/hard/html",
+      "param_name": "q",
+      "param_location": "query",
+      "context_type": "HTML_TEXT",
+      "strategy": "quick_light",
+      "expected_vulnerable": true,
+      "smoke_any": ["<svg", "<img", "<script", "ontoggle", "onload", "onerror"]
+    },
+    {
+      "slug": "html_filter_bypass",
+      "name": "Naive filter bypass",
+      "method": "GET",
+      "path": "/hard/filter-bypass",
+      "param_name": "q",
+      "param_location": "query",
+      "context_type": "HTML_TEXT",
+      "strategy": "unicode_hunt",
+      "expected_vulnerable": true,
+      "filter_kind": "naive_common",
+      "smoke_any": ["ontoggle", "onbegin", "onfocus", "onpointerenter", "<details", "<animate", "<input"]
+    },
+    {
+      "slug": "extreme_filter_bypass",
+      "name": "Extreme strict filter bypass",
+      "method": "GET",
+      "path": "/hard/extreme-filter",
+      "param_name": "q",
+      "param_location": "query",
+      "context_type": "HTML_TEXT",
+      "strategy": "unicode_hunt",
+      "expected_vulnerable": true,
+      "filter_kind": "strict_keywords_and_symbols",
+      "smoke_any": ["onbegin", "onpointerenter", "<animate", "<svg"]
+    },
+    {
+      "slug": "attr_quoted",
+      "name": "Quoted attribute breakout",
+      "method": "GET",
+      "path": "/hard/attr-quoted",
+      "param_name": "name",
+      "param_location": "query",
+      "context_type": "ATTR_QUOTED",
+      "strategy": "quick_light",
+      "expected_vulnerable": true,
+      "smoke_any": ["autofocus", "onfocus", "onanimationstart", "onpointerenter"]
+    },
+    {
+      "slug": "attr_unquoted",
+      "name": "Unquoted attribute breakout",
+      "method": "GET",
+      "path": "/hard/attr-unquoted",
+      "param_name": "probe",
+      "param_location": "query",
+      "context_type": "ATTR_UNQUOTED",
+      "strategy": "quick_light",
+      "expected_vulnerable": true,
+      "smoke_any": ["onerror", "onload", "onfocus", "onpointerenter"]
+    },
+    {
+      "slug": "js_string",
+      "name": "JavaScript string breakout",
+      "method": "GET",
+      "path": "/hard/js-string",
+      "param_name": "term",
+      "param_location": "query",
+      "context_type": "JS_STRING_LITERAL",
+      "strategy": "js_string_specialist",
+      "expected_vulnerable": true,
+      "smoke_any": [";__XSS__", "</script>", "Function", "setTimeout", "queueMicrotask", "Promise.resolve"]
+    },
+    {
+      "slug": "event_handler",
+      "name": "Event handler JavaScript context",
+      "method": "GET",
+      "path": "/hard/event",
+      "param_name": "handler",
+      "param_location": "query",
+      "context_type": "EVENT_HANDLER_ATTR",
+      "strategy": "quick_light",
+      "expected_vulnerable": true,
+      "smoke_any": ["__XSS__", "Function", "setTimeout", "globalThis"]
+    },
+    {
+      "slug": "json_script",
+      "name": "JSON script breakout",
+      "method": "GET",
+      "path": "/hard/json-script",
+      "param_name": "data",
+      "param_location": "query",
+      "context_type": "JSON_VALUE",
+      "strategy": "js_string_specialist",
+      "expected_vulnerable": true,
+      "smoke_any": ["</script>", "\\u003cscript", "\\x3cscript", "<img", "<svg"]
+    },
+    {
+      "slug": "dom_sink",
+      "name": "Delayed DOM innerHTML sink",
+      "method": "GET",
+      "path": "/hard/dom-sink",
+      "param_name": "next",
+      "param_location": "query",
+      "context_type": "HTML_TEXT",
+      "strategy": "quick_light",
+      "expected_vulnerable": true,
+      "smoke_any": ["<svg", "<img", "<iframe", "onload", "onerror"]
+    },
+    {
+      "slug": "post_body",
+      "name": "POST form body reflection",
+      "method": "POST",
+      "path": "/hard/post-body",
+      "param_name": "note",
+      "param_location": "body",
+      "context_type": "HTML_TEXT",
+      "strategy": "quick_light",
+      "expected_vulnerable": true,
+      "sample_request_body": {"note": "hello"},
+      "smoke_any": ["<svg", "<img", "<script", "onload", "onerror"]
+    },
+    {
+      "slug": "post_json",
+      "name": "POST JSON JavaScript string reflection",
+      "method": "POST",
+      "path": "/hard/post-json",
+      "param_name": "message",
+      "param_location": "json",
+      "context_type": "JS_STRING_LITERAL",
+      "strategy": "js_string_specialist",
+      "expected_vulnerable": true,
+      "sample_request_body": {"message": "hello"},
+      "headers": {"Content-Type": "application/json"},
+      "smoke_any": [";__XSS__", "</script>", "Function", "setTimeout"]
+    },
+    {
+      "slug": "safe_html",
+      "name": "Escaped HTML safe control",
+      "method": "GET",
+      "path": "/hard/safe-html",
+      "param_name": "q",
+      "param_location": "query",
+      "context_type": "HTML_TEXT",
+      "strategy": "quick_light",
+      "expected_vulnerable": false,
+      "smoke_any": []
+    },
+    {
+      "slug": "safe_js",
+      "name": "Encoded JavaScript safe control",
+      "method": "GET",
+      "path": "/hard/safe-js",
+      "param_name": "term",
+      "param_location": "query",
+      "context_type": "JS_STRING_LITERAL",
+      "strategy": "js_string_specialist",
+      "expected_vulnerable": false,
+      "smoke_any": []
+    },
+    {
+      "slug": "prototype_pollution",
+      "name": "Query/Hash prototype pollution gadget",
+      "method": "GET",
+      "path": "/hard/prototype-pollution",
+      "param_name": "q",
+      "param_location": "query",
+      "context_type": "HTML_TEXT",
+      "strategy": "csp_aware",
+      "expected_vulnerable": true,
+      "smoke_any": ["__proto__"]
+    },
+    {
+      "slug": "stored_post",
+      "name": "Stored XSS payload submission POST",
+      "method": "POST",
+      "path": "/hard/stored-post",
+      "param_name": "msg",
+      "param_location": "body",
+      "context_type": "HTML_TEXT",
+      "strategy": "quick_light",
+      "expected_vulnerable": true,
+      "sample_request_body": {"msg": "hello"},
+      "smoke_any": ["<svg", "<img", "<script", "onload", "onerror"]
+    },
+    {
+      "slug": "stored_view",
+      "name": "Stored XSS payload view GET",
+      "method": "GET",
+      "path": "/hard/stored-view",
+      "param_name": "msg",
+      "param_location": "query",
+      "context_type": "HTML_TEXT",
+      "strategy": "quick_light",
+      "expected_vulnerable": false,
+      "smoke_any": []
+    },
+    {
+      "slug": "wizard",
+      "name": "Multi-step interactive wizard GET",
+      "method": "GET",
+      "path": "/hard/wizard",
+      "param_name": "step2_input",
+      "param_location": "query",
+      "context_type": "HTML_TEXT",
+      "strategy": "quick_light",
+      "expected_vulnerable": true,
+      "steps": [
+        {"action": "navigate", "url": "http://127.0.0.1:8099/hard/wizard"},
+        {"action": "fill", "selector": "#step1-input", "value": "test_user"},
+        {"action": "click", "selector": "#submit-step1"},
+        {"action": "wait", "seconds": 0.5},
+        {"action": "fill", "selector": "#step2-input", "value": "{{PAYLOAD}}"},
+        {"action": "click", "selector": "#submit-step2"},
+        {"action": "wait", "seconds": 0.5}
+      ],
+      "smoke_any": ["<img src=x onerror=alert(1)>", "<svg onload=alert(1)>"]
+    }
+  ],
+  "experiments": [
+    {"name": "Hard Lab - Quick Light", "strategy": "quick_light"},
+    {"name": "Hard Lab - JS String Specialist", "strategy": "js_string_specialist"},
+    {"name": "Hard Lab - Unicode Hunt", "strategy": "unicode_hunt"},
+    {"name": "Hard Lab - CSP Aware", "strategy": "csp_aware"}
+  ]
+}
