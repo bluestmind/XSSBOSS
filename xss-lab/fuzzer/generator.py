@@ -193,11 +193,92 @@ class PayloadGenerator:
         # Remove duplicates while prioritizing: base_payloads -> llm_payloads (already in payloads) -> mutated_payloads
         payloads = list(dict.fromkeys(base_payloads + payloads + mutated_payloads))
         
+        # AST Pre-Filtering: Filter out invalid JavaScript syntax to prevent CPU thrashing in headless browsers
+        payloads = self._filter_invalid_js_syntax(payloads)
+        
         # Limit payloads
         max_count = max_payloads or profile.get('max_payloads_per_context', 50)
         if len(payloads) > max_count:
             payloads = payloads[:max_count]
         
+        return payloads
+
+    def _filter_invalid_js_syntax(self, payloads: List[str]) -> List[str]:
+        """Filter out payloads that contain invalid JavaScript syntax using Node.js."""
+        import subprocess
+        import json
+        import shutil
+        
+        # Check if node is installed and in path
+        if not shutil.which('node'):
+            return payloads
+            
+        node_script = """
+        const fs = require('fs');
+        try {
+            const payloads = JSON.parse(fs.readFileSync(0, 'utf-8'));
+            const results = payloads.map(payload => {
+                let codeBlocks = [];
+                if (payload.includes('<script')) {
+                    const matches = payload.match(/<script[^>]*>([\\s\\S]*?)<\\/script>/gi);
+                    if (matches) {
+                        matches.forEach(m => {
+                            const content = m.replace(/<script[^>]*>/i, '').replace(/<\\/script>/i, '');
+                            codeBlocks.push(content);
+                        });
+                    }
+                } else if (payload.match(/on[a-z]+=/i)) {
+                    // Try to extract JavaScript from inline attributes
+                    const matches = payload.match(/on[a-z]+=(['"`])([\\s\\S]*?)\\1/gi) || payload.match(/on[a-z]+=([^>\\s]+)/gi);
+                    if (matches) {
+                        matches.forEach(m => {
+                            const content = m.replace(/on[a-z]+=/i, '').replace(/^['"`]|['"`]$/g, '');
+                            codeBlocks.push(content);
+                        });
+                    }
+                } else if (payload.toLowerCase().startsWith('javascript:')) {
+                    codeBlocks.push(payload.substring(11));
+                } else {
+                    // Clean common JS breakouts (e.g. starting with ", ', ;, }, ) and ending with comments)
+                    let cleaned = payload.replace(/^['"`\\);,}\\s]+/, '').replace(/[\\/\\*-\\s]+$/, '');
+                    if (cleaned) {
+                        codeBlocks.push(cleaned);
+                    }
+                }
+
+                for (const code of codeBlocks) {
+                    try {
+                        new Function(code);
+                    } catch (e) {
+                        if (e instanceof SyntaxError) {
+                            return false;
+                        }
+                    }
+                }
+                return true;
+            });
+            console.log(JSON.stringify(results));
+        } catch (err) {
+            process.exit(1);
+        }
+        """
+        
+        try:
+            proc = subprocess.Popen(
+                ['node', '-e', node_script],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding='utf-8'
+            )
+            stdout, stderr = proc.communicate(input=json.dumps(payloads), timeout=5)
+            if proc.returncode == 0:
+                validity_map = json.loads(stdout)
+                return [payloads[i] for i in range(len(payloads)) if validity_map[i]]
+        except Exception as e:
+            pass
+            
         return payloads
     
     def _apply_filter_aware_mutations(

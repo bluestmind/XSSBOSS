@@ -30,7 +30,17 @@
 
     window.__XSS__ = function(sinkType, value, errorStack) {
         if (Array.isArray(sinkType)) {
-            sinkType = 'TemplateLiteral';
+            const strings = sinkType;
+            const values = Array.prototype.slice.call(arguments, 1);
+            let fullStr = '';
+            for (let i = 0; i < strings.length; i++) {
+                fullStr += strings[i];
+                if (i < values.length) {
+                    fullStr += String(values[i]);
+                }
+            }
+            value = fullStr;
+            sinkType = 'TaggedTemplateLiteral';
         }
         if (value && typeof value === 'string' && !sinkType.startsWith('DOMSourceRead:')) {
             for (const [source, marker] of Object.entries(taintMarkers)) {
@@ -2581,6 +2591,49 @@
         }
     } catch (err) {
         console.error('XSS Oracle: Failed to setup stylesheet insertion hooks', err);
+    }
+
+    // Hook 48: Trusted Types API Hijacking for CSP Bypass
+    try {
+        if (window.trustedTypes && window.trustedTypes.createPolicy) {
+            const originalCreatePolicy = window.trustedTypes.createPolicy;
+            window.trustedTypes.createPolicy = function(name, rules) {
+                const wrappedRules = {};
+                if (rules.createHTML) {
+                    wrappedRules.createHTML = function(html, ...args) {
+                        if (typeof html === 'string' && html.includes(token)) {
+                            __XSS__('TrustedType:createHTML:' + name, html, new Error().stack);
+                        }
+                        return rules.createHTML.call(rules, html, ...args);
+                    };
+                } else {
+                    wrappedRules.createHTML = (html) => html;
+                }
+                if (rules.createScript) {
+                    wrappedRules.createScript = function(script, ...args) {
+                        if (typeof script === 'string' && script.includes(token)) {
+                            __XSS__('TrustedType:createScript:' + name, script, new Error().stack);
+                        }
+                        return rules.createScript.call(rules, script, ...args);
+                    };
+                } else {
+                    wrappedRules.createScript = (script) => script;
+                }
+                if (rules.createScriptURL) {
+                    wrappedRules.createScriptURL = function(url, ...args) {
+                        if (typeof url === 'string' && url.includes(token)) {
+                            __XSS__('TrustedType:createScriptURL:' + name, url, new Error().stack);
+                        }
+                        return rules.createScriptURL.call(rules, url, ...args);
+                    };
+                } else {
+                    wrappedRules.createScriptURL = (url) => url;
+                }
+                return originalCreatePolicy.call(window.trustedTypes, name, wrappedRules);
+            };
+        }
+    } catch (err) {
+        console.error('XSS Oracle: Failed to setup Trusted Types hooks', err);
     }
 
     console.log('XSS Oracle: Injected successfully', { token: token.substring(0, 8) + '...' });
