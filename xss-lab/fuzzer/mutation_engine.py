@@ -512,6 +512,21 @@ class MutationEngine:
                     res.append(f"\\u{{{ord(c):x}}}")
             return "".join(res)
 
+        def synthesize_word(word: str) -> str:
+            parts = []
+            for c in word:
+                if 'a' <= c <= 'z':
+                    parts.append(f"{ord(c) - 87}..toString(36)")
+                elif 'A' <= c <= 'Z':
+                    parts.append(f"({ord(c.lower()) - 87}..toString(36))['toUpperCase']()")
+                elif '0' <= c <= '9':
+                    parts.append(f"{c}")
+                elif c == '_':
+                    parts.append("String['fromCharCode'](95)")
+                else:
+                    parts.append(f"String['fromCharCode']({ord(c)})")
+            return "+".join(parts)
+
         def obfuscate_js(code: str) -> str:
             # 1. Extract existing string literals to avoid modifying dots/keywords inside them
             placeholders = {}
@@ -529,18 +544,21 @@ class MutationEngine:
 
             code = re.sub(string_pattern, str_repl, code)
 
-            # 2. Replace standalone global keywords (not properties) with brackets
+            # 2. Replace standalone global keywords with base-36 synthesized quote-free brackets
             replacements = {
-                r'(?<!\.)\bdocument\b': 'self["document"]',
+                r'(?<!\.)\bdocument\b': f'self[{synthesize_word("document")}]',
                 r'(?<!\.)\bwindow\b': 'self',
-                r'(?<!\.)\blocation\b': 'self["location"]',
-                r'(?<!\.)\b__XSS__\b': 'self["__XSS__"]',
+                r'(?<!\.)\blocation\b': f'self[{synthesize_word("location")}]',
+                r'(?<!\.)\b__XSS__\b': f'self[{synthesize_word("__XSS__")}]',
             }
             for pattern, repl in replacements.items():
                 code = re.sub(pattern, repl, code)
 
-            # 3. Convert dot property accesses to brackets
-            code = re.sub(r'\.([a-zA-Z_][a-zA-Z0-9_]*)', r'["\1"]', code)
+            # 3. Convert dot property accesses to base-36 synthesized brackets
+            def repl_dot(match):
+                prop_name = match.group(1)
+                return f"[{synthesize_word(prop_name)}]"
+            code = re.sub(r'\.([a-zA-Z_][a-zA-Z0-9_]*)', repl_dot, code)
 
             # 4. Match and obfuscate the newly created bracket property strings
             def repl_bracket_str(match):
