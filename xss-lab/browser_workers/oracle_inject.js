@@ -182,6 +182,77 @@
         console.error('XSS Oracle: Failed to setup toString spoofing', err);
     }
 
+    // Hook: Object.prototype properties for Prototype Pollution write & read detection
+    try {
+        const gadgetProperties = ["html", "onload", "src", "url", "href", "sourceURL", "content", "jquery"];
+        gadgetProperties.forEach(prop => {
+            let val = undefined;
+            Object.defineProperty(Object.prototype, prop, {
+                get: function() {
+                    if (val && typeof val === 'string' && val.includes(token)) {
+                        __XSS__('PrototypePollutionRead:' + prop, val, new Error().stack);
+                    }
+                    return val;
+                },
+                set: function(newVal) {
+                    if (newVal && typeof newVal === 'string' && newVal.includes(token)) {
+                        __XSS__('PrototypePollutionWrite:' + prop, newVal, new Error().stack);
+                    }
+                    val = newVal;
+                },
+                configurable: true,
+                enumerable: true
+            });
+        });
+    } catch (err) {
+        console.error('XSS Oracle: Failed to setup Prototype Pollution hooks', err);
+    }
+
+    // Hook RegExp and String matching methods to extract active frontend filtering rules
+    try {
+        const originalTest = RegExp.prototype.test;
+        RegExp.prototype.test = function(str) {
+            if (typeof str === 'string' && str.includes(token)) {
+                console.warn(`[TaintFlow] RegExp.test called with pattern: ${this.source} (flags: ${this.flags})`);
+            }
+            return originalTest.call(this, str);
+        };
+        window.__registerOracleHook__(RegExp.prototype.test, originalTest, 'test');
+
+        const originalExec = RegExp.prototype.exec;
+        RegExp.prototype.exec = function(str) {
+            if (typeof str === 'string' && str.includes(token)) {
+                console.warn(`[TaintFlow] RegExp.exec called with pattern: ${this.source} (flags: ${this.flags})`);
+            }
+            return originalExec.call(this, str);
+        };
+        window.__registerOracleHook__(RegExp.prototype.exec, originalExec, 'exec');
+
+        const originalMatch = String.prototype.match;
+        String.prototype.match = function(regexp) {
+            if (this && typeof this === 'string' && this.includes(token) && regexp) {
+                const pattern = regexp instanceof RegExp ? regexp.source : String(regexp);
+                const flags = regexp instanceof RegExp ? regexp.flags : '';
+                console.warn(`[TaintFlow] String.match called on token with pattern: ${pattern} (flags: ${flags})`);
+            }
+            return originalMatch.call(this, regexp);
+        };
+        window.__registerOracleHook__(String.prototype.match, originalMatch, 'match');
+
+        const originalSearch = String.prototype.search;
+        String.prototype.search = function(regexp) {
+            if (this && typeof this === 'string' && this.includes(token) && regexp) {
+                const pattern = regexp instanceof RegExp ? regexp.source : String(regexp);
+                const flags = regexp instanceof RegExp ? regexp.flags : '';
+                console.warn(`[TaintFlow] String.search called on token with pattern: ${pattern} (flags: ${flags})`);
+            }
+            return originalSearch.call(this, regexp);
+        };
+        window.__registerOracleHook__(String.prototype.search, originalSearch, 'search');
+    } catch (err) {
+        console.error('XSS Oracle: Failed to setup RegExp filter extraction hooks', err);
+    }
+
     // Hook: Capture JS runtime errors
     window.addEventListener('error', function(event) {
         if (event.error) {

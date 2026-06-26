@@ -61,6 +61,25 @@ def extract_taint_flow_rules(telemetry: Dict[str, Any]) -> Dict[str, Any]:
                 rules['force_lowercase'] = True
             elif 'String.toUpperCase' in text:
                 rules['force_uppercase'] = True
+            elif 'RegExp.' in text or 'String.match' in text or 'String.search' in text:
+                import re
+                match = re.search(r'pattern:\s*(.*?)\s*\(flags:\s*([a-z]*)\)', text)
+                if match:
+                    pattern = match.group(1).strip()
+                    # Extract char class blocks e.g. [<>'"]
+                    char_classes = re.findall(r'\[([^\]]+)\]', pattern)
+                    for cc in char_classes:
+                        for char in ["<", ">", "'", '"', "`", "(", ")", "/", "\\"]:
+                            if char in cc:
+                                rules['blocked_chars'].add(char)
+                    # Extract word literals (simple clean-up of regex symbols)
+                    clean_pattern = re.sub(r'\\[a-zA-Z]', '', pattern)
+                    clean_pattern = re.sub(r'[^a-zA-Z0-9_|]', '', clean_pattern)
+                    words = clean_pattern.split('|')
+                    for w in words:
+                        if w and len(w) > 2:
+                            rules['blocked_words'].add(w.lower())
+                            
                 
     # Convert sets to lists for JSON serialization compatibility
     rules['blocked_chars'] = list(rules['blocked_chars'])
