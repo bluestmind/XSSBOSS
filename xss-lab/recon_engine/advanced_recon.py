@@ -105,21 +105,39 @@ class AdvancedRecon:
             # getParameterByName("param") or getQueryParam("param")
             re.compile(r"""\b(?:getParameterByName|getQueryParam|getParam|getCookie)\(\s*(?:"|')([a-zA-Z0-9_\-]{1,32})(?:"|')\s*\)"""),
             # queryParams["param"] or params['param']
-            re.compile(r"""\b(?:queryParams|query|params|args)\[\s*(?:"|')([a-zA-Z0-9_\-]{1,32})(?:"|')\s*\]""")
+            re.compile(r"""\b(?:queryParams|query|params|args)\[\s*(?:"|')([a-zA-Z0-9_\-]{1,32})(?:"|')\s*\]"""),
+            # object property parameters access, e.g. searchParams.paramName
+            re.compile(r"""\b[a-zA-Z0-9_$]*(?:Params|Query|Args)\s*\.\s*([a-zA-Z0-9_\-]{1,32})\b"""),
+            # ES6 Destructuring: const { param1, param2 } = params
+            re.compile(r"""(?:const|let|var)\s*\{\s*([a-zA-Z0-9_\-,\s]+)\s*\}\s*=\s*(?:urlParams|queryParams|params|args|searchParams)""")
         ]
         
         mined_params = set()
         
-        for js_url in list(js_files)[:15]:  # Limit to 15 JS files max
+        # Concurrent script content fetching
+        import concurrent.futures
+        
+        def fetch_script_content(js_url):
             try:
                 full_js_url = urllib.parse.urljoin(base_url, js_url)
                 req = urllib.request.Request(
                     full_js_url,
                     headers={"User-Agent": "XSSBoss-Recon/1.0"}
                 )
-                with urllib.request.urlopen(req, timeout=5.0) as response:
-                    content = response.read().decode("utf-8", errors="ignore")
-                    
+                with urllib.request.urlopen(req, timeout=3.0) as response:
+                    return js_url, response.read().decode("utf-8", errors="ignore")
+            except Exception as js_err:
+                logger.debug(f"[Advanced Recon] Could not scrape script {js_url}: {js_err}")
+                return js_url, ""
+                
+        js_list = list(js_files)[:20]  # Limit to 20 JS files max
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_url = {executor.submit(fetch_script_content, url): url for url in js_list}
+            for future in concurrent.futures.as_completed(future_to_url):
+                js_url, content = future.result()
+                if not content:
+                    continue
+                try:
                     # 1. Scrape URLs/Paths
                     matches = link_regex.findall(content)
                     for path in matches:
@@ -130,11 +148,13 @@ class AdvancedRecon:
                     for regex in param_regexes:
                         param_matches = regex.findall(content)
                         for p in param_matches:
-                            if p and len(p) > 1 and p not in ["true", "false", "null", "undefined"]:
-                                mined_params.add(p)
-                                
-            except Exception as js_err:
-                logger.info(f"[Advanced Recon] Could not scrape script {js_url}: {js_err}")
+                            # Handle comma-separated destructuring matches
+                            sub_params = [sp.strip() for sp in p.split(",")] if "," in p else [p]
+                            for sp in sub_params:
+                                if sp and len(sp) > 1 and sp not in ["true", "false", "null", "undefined"]:
+                                    mined_params.add(sp)
+                except Exception as parse_err:
+                    logger.debug(f"[Advanced Recon] Failed parsing js content from {js_url}: {parse_err}")
                 
         # Register mined custom parameters to all target GET endpoints (excluding JS files themselves)
         if mined_params:
