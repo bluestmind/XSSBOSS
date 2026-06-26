@@ -65,6 +65,7 @@ class StoredXSSVerifier:
             target_id=submit_endpoint.target_id,
             revisit_endpoint_ids=revisit_endpoint_ids,
             max_revisits=max_revisits,
+            submit_endpoint=submit_endpoint,
         )
 
         experiment = StoredXSSVerifier._get_or_create_experiment(db, submit_endpoint.target_id)
@@ -333,6 +334,7 @@ class StoredXSSVerifier:
         target_id: int,
         revisit_endpoint_ids: Optional[List[int]],
         max_revisits: int,
+        submit_endpoint: Optional[Endpoint] = None,
     ) -> List[Endpoint]:
         if revisit_endpoint_ids:
             endpoints = (
@@ -346,9 +348,39 @@ class StoredXSSVerifier:
                 db.query(Endpoint)
                 .filter(Endpoint.target_id == target_id)
                 .filter(Endpoint.method == "GET")
-                .limit(max_revisits)
                 .all()
             )
+
+        if submit_endpoint and len(endpoints) > 1:
+            import urllib.parse
+            sub_url = submit_endpoint.url_pattern
+            sub_path = urllib.parse.urlparse(sub_url).path.strip("/")
+            sub_parts = [p for p in sub_path.split("/") if p]
+            sub_set = set(sub_parts)
+            
+            def calculate_rank(ep: Endpoint) -> Tuple[int, float]:
+                ep_path = urllib.parse.urlparse(ep.url_pattern).path.strip("/")
+                ep_parts = [p for p in ep_path.split("/") if p]
+                ep_set = set(ep_parts)
+                
+                # 1. Prefix matches (consecutive matching segments from the start)
+                prefix_match = 0
+                for a, b in zip(sub_parts, ep_parts):
+                    if a == b:
+                        prefix_match += 1
+                    else:
+                        break
+                        
+                # 2. Jaccard similarity of path components
+                jaccard = 0.0
+                if sub_set or ep_set:
+                    intersection = len(sub_set.intersection(ep_set))
+                    union = len(sub_set.union(ep_set))
+                    jaccard = intersection / union if union > 0 else 0.0
+                    
+                return (prefix_match, jaccard)
+                
+            endpoints.sort(key=calculate_rank, reverse=True)
 
         return endpoints[:max_revisits]
 
