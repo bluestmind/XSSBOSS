@@ -268,6 +268,54 @@ class GeneticBreeder:
             
         return payload
 
+    @classmethod
+    def _execute_q_class_mutation(cls, payload: str, action_class: str) -> str:
+        from fuzzer.constraint_solver import TransformationConstraintSolver
+        
+        groups = {
+            'obfuscate_case': [
+                lambda p: MutationEngine.apply_mixed_case(p)
+            ],
+            'obfuscate_whitespace': [
+                lambda p: MutationEngine.apply_zero_width(p, 1),
+                lambda p: MutationEngine.apply_alternative_whitespace(p)
+            ],
+            'obfuscate_escapes': [
+                lambda p: MutationEngine.apply_comment_obfuscation(p),
+                lambda p: MutationEngine.apply_homoglyphs(p, 0.4),
+                lambda p: MutationEngine.apply_alternating_escapes(p)
+            ],
+            'bypass_csp': [
+                lambda p: random.choice(MutationEngine.apply_csp_bypass_cdn(p)),
+                lambda p: random.choice(MutationEngine.apply_csp_bypass_angular(p)),
+                lambda p: random.choice(MutationEngine.apply_template_tag_calls(p)),
+                lambda p: random.choice(MutationEngine.apply_framework_directives(p))
+            ],
+            'bypass_mxss': [
+                lambda p: random.choice(MutationEngine.apply_mxss_nesting(p)),
+                lambda p: random.choice(MutationEngine.apply_mxss_namespaced(p))
+            ],
+            'bypass_dom_clobbering': [
+                lambda p: random.choice(MutationEngine.apply_dom_clobbering(p))
+            ],
+            'bypass_prototype_pollution': [
+                lambda p: random.choice(MutationEngine.apply_prototype_pollution(p)),
+                lambda p: random.choice(MutationEngine.apply_some_taint_theft(p))
+            ],
+            'solve_constraints': [
+                lambda p: TransformationConstraintSolver.solve_nested_replacement(p, "script"),
+                lambda p: TransformationConstraintSolver.solve_nested_replacement(p, "onerror"),
+                lambda p: TransformationConstraintSolver.solve_sequence(p, ["unicode_normalize"])
+            ]
+        }
+        
+        mutators = groups.get(action_class, groups['obfuscate_case'])
+        mutator = random.choice(mutators)
+        try:
+            return mutator(payload)
+        except Exception:
+            return payload
+
     @staticmethod
     def crossover(parent_a: str, parent_a_token: str, parent_b: str, parent_b_token: str, new_token: str) -> str:
         """Perform crossover between two parent payloads while keeping token intact."""
@@ -506,6 +554,22 @@ class GeneticBreeder:
                 if 'brackets_stripped' in normalization:
                     payload = re.sub(r'([a-zA-Z0-9_$]+)\(([^)]*)\)', r'\1`\2`', payload)
 
+        # Resolve target DOM context type (defaults to 'HTML_TEXT')
+        context_str = filter_profile.get('context_type', 'HTML_TEXT') if filter_profile else 'HTML_TEXT'
+        
+        # Pick optimal mutation class category using Q-Learning policy
+        q_opt = GeneticEvolutionEngine._get_q_optimizer()
+        action_class = q_opt.select_action(context_str)
+        
+        # Apply the context-optimized mutation class category
+        try:
+            payload = GeneticBreeder._execute_q_class_mutation(payload, action_class)
+        except Exception:
+            pass
+            
+        # Record the context-action history for parent feedback updates
+        GeneticEvolutionEngine._context_action_history[payload] = (context_str, action_class)
+
         # Next-Gen Markov Chain guided mutation sequence selection
         selector = GeneticBreeder._get_markov_selector()
         
@@ -624,7 +688,9 @@ class GeneticEvolutionEngine:
     """Orchestrates generations, selections, and population breeding."""
 
     _bandit_selector = None
+    _q_optimizer = None
     _token_action_history = {}
+    _context_action_history = {}
 
     @classmethod
     def _get_bandit_selector(cls):
@@ -632,6 +698,23 @@ class GeneticEvolutionEngine:
             from fuzzer.bandit import ThompsonSelector
             cls._bandit_selector = ThompsonSelector(['genetic_breed', 'llm_guided'])
         return cls._bandit_selector
+
+    @classmethod
+    def _get_q_optimizer(cls):
+        if cls._q_optimizer is None:
+            from fuzzer.q_learning import QTableOptimizer
+            states = [
+                'HTML_TEXT', 'ATTR_QUOTED', 'ATTR_UNQUOTED', 
+                'JS_STRING_LITERAL', 'JS_IDENTIFIER', 'EVENT_HANDLER_ATTR',
+                'CSS_STYLE', 'URL_QUERY'
+            ]
+            actions = [
+                'obfuscate_case', 'obfuscate_whitespace', 'obfuscate_escapes',
+                'bypass_csp', 'bypass_mxss', 'bypass_dom_clobbering', 
+                'bypass_prototype_pollution', 'solve_constraints'
+            ]
+            cls._q_optimizer = QTableOptimizer(states, actions)
+        return cls._q_optimizer
 
     def __init__(self, db: Session):
         self.db = db
@@ -648,6 +731,15 @@ class GeneticEvolutionEngine:
         population_size: int = 20
     ) -> List[str]:
         """Breed the next generation from the previous generation's results."""
+        # Resolve target DOM context type and store in filter_profile
+        from backend_api.models.context import Context
+        ctx_obj = self.db.query(Context).filter(Context.id == context_id).first()
+        context_str = ctx_obj.context_type if ctx_obj else "HTML_TEXT"
+        
+        if not filter_profile:
+            filter_profile = {}
+        filter_profile['context_type'] = context_str
+
         # 1. Retrieve the previous generation test cases
         prev_cases = (
             self.db.query(TestCase)
@@ -695,6 +787,14 @@ class GeneticEvolutionEngine:
                 # If fitness is >= 40.0, count as bandit success
                 success = fitness >= 40.0
                 bandit.update(action, success)
+
+        # Next-Gen Reinforcement: Update Q-Learning Table rewards
+        q_opt = cls._get_q_optimizer()
+        for case, fitness in scored_population:
+            history = cls._context_action_history.get(case.payload)
+            if history:
+                state, action = history
+                q_opt.update_q_value(state, action, state, fitness)
 
         # Automatically detect and flag CSP constraints from runtime telemetry (securitypolicyviolation)
         triggered_csp = False
