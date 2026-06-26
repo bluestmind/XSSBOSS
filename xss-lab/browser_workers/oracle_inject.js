@@ -162,6 +162,26 @@
         }
     };
 
+    // Evasion: Function.prototype.toString spoofing to prevent anti-bot detection of hooked natives
+    const hookMap = new Map();
+    window.__registerOracleHook__ = function(hookedFn, originalFn, name) {
+        hookMap.set(hookedFn, { originalFn, name });
+    };
+
+    try {
+        const originalToString = Function.prototype.toString;
+        Function.prototype.toString = function() {
+            if (hookMap.has(this)) {
+                const info = hookMap.get(this);
+                return `function ${info.name}() { [native code] }`;
+            }
+            return originalToString.apply(this, arguments);
+        };
+        window.__registerOracleHook__(Function.prototype.toString, originalToString, 'toString');
+    } catch (err) {
+        console.error('XSS Oracle: Failed to setup toString spoofing', err);
+    }
+
     // Hook: Capture JS runtime errors
     window.addEventListener('error', function(event) {
         if (event.error) {
