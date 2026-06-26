@@ -174,13 +174,18 @@ class FitnessScorer:
             from fuzzer.sequence_alignment import DOMSequenceAligner
             similarity = DOMSequenceAligner.calculate_similarity(clean_payload, clean_dom)
             
-            # If browser modified the markup structure (mXSS indicator)
-            # e.g., if annotation-xml or SVG namespaces are rewritten/parsed
             if any(marker in clean_dom.lower() for marker in ["<math", "<svg", "<annotation-xml", "<noscript"]) and not any(marker in clean_payload.lower() for marker in ["<math", "<svg", "<annotation-xml", "<noscript"]):
                 score += 30.0  # High bonus for triggering parser-differential!
             elif similarity < 0.95:
                 # Structural difference indicating parser modification/sanitization or potential mXSS bypass
                 score += (1.0 - similarity) * 40.0
+
+        # 7. Local Theoretical mXSS Parser Round-Trip Check
+        if test_case.payload:
+            from fuzzer.mxss_simulator import MXSSSimulator
+            mxss_sim_score = MXSSSimulator.check_mutation_differential(test_case.payload)
+            if mxss_sim_score > 0.0:
+                score += mxss_sim_score * 0.1
 
         return min(95.0, score)  # Cap non-verified runs at 95.0
 
