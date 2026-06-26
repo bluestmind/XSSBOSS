@@ -535,6 +535,21 @@ class GeneticEvolutionEngine:
         # 3. Sort by fitness (highest first)
         scored_population.sort(key=lambda x: x[1], reverse=True)
 
+        # Automatically detect and flag CSP constraints from runtime telemetry (securitypolicyviolation)
+        triggered_csp = False
+        for case in prev_cases:
+            executions = self.db.query(Execution).filter(Execution.test_case_id == case.id).all()
+            for execution in executions:
+                if execution.logs and ('securitypolicyviolation' in execution.logs or 'CSP' in execution.logs):
+                    triggered_csp = True
+                    break
+            if triggered_csp:
+                break
+        if triggered_csp:
+            if not filter_profile:
+                filter_profile = {}
+            filter_profile['csp_detected'] = True
+
         # If we have a verified XSS (score 100), we don't need to breed further
         if scored_population and scored_population[0][1] >= 100.0:
             return []
