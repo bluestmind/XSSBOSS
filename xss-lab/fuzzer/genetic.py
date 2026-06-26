@@ -936,9 +936,12 @@ class GeneticEvolutionEngine:
                 child = Tokenizer.replace_token(child, token, token)
                 GeneticEvolutionEngine._token_action_history[child] = 'llm_guided'
             else:
-                # Fallback to genetic breed
-                p1_payload, p1_token = random.choice(parents)
-                p2_payload, p2_token = random.choice(parents)
+                # Boltzmann-weighted parent selection
+                from fuzzer.boltzmann import BoltzmannSelector
+                selected = BoltzmannSelector.select_parents(scored_population, generation_number, k=2)
+                p1_case, p2_case = selected[0], selected[1]
+                p1_payload, p1_token = p1_case.payload, p1_case.token
+                p2_payload, p2_token = p2_case.payload, p2_case.token
                 
                 # Crossover
                 child = GeneticBreeder.crossover(p1_payload, p1_token, p2_payload, p2_token, token)
