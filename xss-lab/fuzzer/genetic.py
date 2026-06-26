@@ -623,6 +623,16 @@ class GeneticBreeder:
 class GeneticEvolutionEngine:
     """Orchestrates generations, selections, and population breeding."""
 
+    _bandit_selector = None
+    _token_action_history = {}
+
+    @classmethod
+    def _get_bandit_selector(cls):
+        if cls._bandit_selector is None:
+            from fuzzer.bandit import ThompsonSelector
+            cls._bandit_selector = ThompsonSelector(['genetic_breed', 'llm_guided'])
+        return cls._bandit_selector
+
     def __init__(self, db: Session):
         self.db = db
 
@@ -676,6 +686,15 @@ class GeneticEvolutionEngine:
                 sequence = GeneticBreeder._token_technique_history.get(case.token, [])
                 if sequence:
                     selector.matrix.update_transitions(sequence, fitness)
+
+        # Next-Gen Reinforcement: Update Multi-Armed Bandit strategy rewards
+        bandit = cls._get_bandit_selector()
+        for case, fitness in scored_population:
+            action = cls._token_action_history.get(case.payload)
+            if action:
+                # If fitness is >= 40.0, count as bandit success
+                success = fitness >= 40.0
+                bandit.update(action, success)
 
         # Automatically detect and flag CSP constraints from runtime telemetry (securitypolicyviolation)
         triggered_csp = False
@@ -806,16 +825,27 @@ class GeneticEvolutionEngine:
         for p in llm_payloads:
             next_gen_payloads.append(p)
 
+        bandit = GeneticEvolutionEngine._get_bandit_selector()
         while len(next_gen_payloads) < population_size:
-            # Select two parents
-            p1_payload, p1_token = random.choice(parents)
-            p2_payload, p2_token = random.choice(parents)
+            action = bandit.select_action()
             
-            # Crossover
-            child = GeneticBreeder.crossover(p1_payload, p1_token, p2_payload, p2_token, token)
-            
-            # Mutation
-            child = GeneticBreeder.mutate(child, token, filter_profile)
+            if action == 'llm_guided' and llm_payloads:
+                # Pick a random LLM suggestion
+                child = random.choice(llm_payloads)
+                # Ensure the base token is updated
+                child = Tokenizer.replace_token(child, token, token)
+                GeneticEvolutionEngine._token_action_history[child] = 'llm_guided'
+            else:
+                # Fallback to genetic breed
+                p1_payload, p1_token = random.choice(parents)
+                p2_payload, p2_token = random.choice(parents)
+                
+                # Crossover
+                child = GeneticBreeder.crossover(p1_payload, p1_token, p2_payload, p2_token, token)
+                
+                # Mutation
+                child = GeneticBreeder.mutate(child, token, filter_profile)
+                GeneticEvolutionEngine._token_action_history[child] = 'genetic_breed'
             
             next_gen_payloads.append(child)
 
