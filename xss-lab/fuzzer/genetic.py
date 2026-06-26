@@ -184,6 +184,85 @@ class FitnessScorer:
 class GeneticBreeder:
     """Breeds new generations of fuzzing payloads from successful parents."""
 
+    _markov_selector = None
+    _token_technique_history = {}
+
+    @classmethod
+    def _get_markov_selector(cls):
+        if cls._markov_selector is None:
+            from fuzzer.markov_chain import MarkovBreederSelector
+            states = [
+                'apply_mixed_case',
+                'apply_zero_width',
+                'apply_comment_obfuscation',
+                'apply_alternative_whitespace',
+                'apply_homoglyphs',
+                'apply_alternating_escapes',
+                'apply_csp_bypass_cdn',
+                'apply_csp_bypass_angular',
+                'apply_framework_directives',
+                'apply_template_tag_calls',
+                'apply_dom_clobbering',
+                'apply_prototype_pollution',
+                'apply_cache_poisoning_bypass',
+                'apply_mxss_nesting',
+                'apply_mxss_namespaced',
+                'apply_some_taint_theft',
+                'apply_webview_ipc_escape',
+                'apply_postmessage_window_name_escape',
+                'solve_nested_replacement',
+                'solve_unicode_normalize'
+            ]
+            cls._markov_selector = MarkovBreederSelector(states)
+        return cls._markov_selector
+
+    @classmethod
+    def _execute_markov_mutation(cls, payload: str, state: str) -> str:
+        from fuzzer.constraint_solver import TransformationConstraintSolver
+        
+        if state == 'apply_mixed_case':
+            return MutationEngine.apply_mixed_case(payload)
+        elif state == 'apply_zero_width':
+            return MutationEngine.apply_zero_width(payload, 1)
+        elif state == 'apply_comment_obfuscation':
+            return MutationEngine.apply_comment_obfuscation(payload)
+        elif state == 'apply_alternative_whitespace':
+            return MutationEngine.apply_alternative_whitespace(payload)
+        elif state == 'apply_homoglyphs':
+            return MutationEngine.apply_homoglyphs(payload, 0.4)
+        elif state == 'apply_alternating_escapes':
+            return MutationEngine.apply_alternating_escapes(payload)
+        elif state == 'apply_csp_bypass_cdn':
+            return random.choice(MutationEngine.apply_csp_bypass_cdn(payload))
+        elif state == 'apply_csp_bypass_angular':
+            return random.choice(MutationEngine.apply_csp_bypass_angular(payload))
+        elif state == 'apply_framework_directives':
+            return random.choice(MutationEngine.apply_framework_directives(payload))
+        elif state == 'apply_template_tag_calls':
+            return random.choice(MutationEngine.apply_template_tag_calls(payload))
+        elif state == 'apply_dom_clobbering':
+            return random.choice(MutationEngine.apply_dom_clobbering(payload))
+        elif state == 'apply_prototype_pollution':
+            return random.choice(MutationEngine.apply_prototype_pollution(payload))
+        elif state == 'apply_cache_poisoning_bypass':
+            return random.choice(MutationEngine.apply_cache_poisoning_bypass(payload))
+        elif state == 'apply_mxss_nesting':
+            return random.choice(MutationEngine.apply_mxss_nesting(payload))
+        elif state == 'apply_mxss_namespaced':
+            return random.choice(MutationEngine.apply_mxss_namespaced(payload))
+        elif state == 'apply_some_taint_theft':
+            return random.choice(MutationEngine.apply_some_taint_theft(payload))
+        elif state == 'apply_webview_ipc_escape':
+            return random.choice(MutationEngine.apply_webview_ipc_escape(payload))
+        elif state == 'apply_postmessage_window_name_escape':
+            return random.choice(MutationEngine.apply_postmessage_window_name_escape(payload))
+        elif state == 'solve_nested_replacement':
+            return TransformationConstraintSolver.solve_nested_replacement(payload, "script")
+        elif state == 'solve_unicode_normalize':
+            return TransformationConstraintSolver.solve_sequence(payload, ["unicode_normalize"])
+            
+        return payload
+
     @staticmethod
     def crossover(parent_a: str, parent_a_token: str, parent_b: str, parent_b_token: str, new_token: str) -> str:
         """Perform crossover between two parent payloads while keeping token intact."""
@@ -422,16 +501,23 @@ class GeneticBreeder:
                 if 'brackets_stripped' in normalization:
                     payload = re.sub(r'([a-zA-Z0-9_$]+)\(([^)]*)\)', r'\1`\2`', payload)
 
-        # Apply 1 to 3 mutations
-        num_mutations = random.randint(1, 3)
-        for _ in range(num_mutations):
-            if not techniques:
-                break
-            mutator = random.choice(techniques)
+        # Next-Gen Markov Chain guided mutation sequence selection
+        selector = GeneticBreeder._get_markov_selector()
+        
+        # Sample technique sequence from Markov matrix (length 2)
+        chain = selector.select_technique_chain('apply_mixed_case', steps=2)
+        
+        # Sequentially apply the sampled technique transitions
+        for state in chain:
             try:
+                # Wrap each mutation function call
+                mutator = lambda p: GeneticBreeder._execute_markov_mutation(p, state)
                 payload = MutationEngine._apply_to_unprotected(payload, protected_tokens, mutator)
             except Exception:
-                pass  # Fallback to original
+                pass
+                
+        # Register the sequence for the newborn child token so we can update the transition matrix during evolve phase
+        GeneticBreeder._token_technique_history[token] = chain
 
         # Repair syntax errors in JavaScript contexts dynamically
         try:
@@ -577,6 +663,14 @@ class GeneticEvolutionEngine:
 
         # 3. Sort by fitness (highest first)
         scored_population.sort(key=lambda x: x[1], reverse=True)
+
+        # Next-Gen Reinforcement: Update Markov transition weights for successful parents
+        selector = GeneticBreeder._get_markov_selector()
+        for case, fitness in scored_population:
+            if fitness > 15.0:
+                sequence = GeneticBreeder._token_technique_history.get(case.token, [])
+                if sequence:
+                    selector.matrix.update_transitions(sequence, fitness)
 
         # Automatically detect and flag CSP constraints from runtime telemetry (securitypolicyviolation)
         triggered_csp = False
