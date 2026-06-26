@@ -769,6 +769,7 @@ class GeneticEvolutionEngine:
         population_size: int = 20
     ) -> List[str]:
         """Breed the next generation from the previous generation's results."""
+        cls = self.__class__
         # Resolve target DOM context type and store in filter_profile
         from backend_api.models.context import Context
         ctx_obj = self.db.query(Context).filter(Context.id == context_id).first()

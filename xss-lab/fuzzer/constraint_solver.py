@@ -1,9 +1,34 @@
 import re
+import unicodedata
 from typing import List, Dict, Set, Optional
 
 class TransformationConstraintSolver:
     """Mathematical transformation constraint solver for decoding and bypassing sequential filters."""
     
+    _unicode_cache: Dict[str, List[str]] = {}
+
+    @classmethod
+    def _init_unicode_cache(cls):
+        """Dynamically scans the Unicode plane and maps compatible decomposition characters (NFKD)."""
+        if cls._unicode_cache:
+            return
+        
+        # We target common XSS control characters and alphabet for bypasses
+        targets = "sakiacoderpt<>'\"()[]/\\;= "
+        cls._unicode_cache = {char: [] for char in targets}
+        
+        # Scan basic multilingual plane (BMP) which covers 99.9% of bypass cases
+        for i in range(65536):
+            try:
+                c = chr(i)
+                normalized = unicodedata.normalize('NFKD', c)
+                # Check if the normalized character contains or is equal to our target character
+                for target in targets:
+                    if target in normalized and c != target:
+                        cls._unicode_cache[target].append(c)
+            except (ValueError, OverflowError):
+                continue
+
     @staticmethod
     def solve_nested_replacement(target_word: str, blocked_word: str) -> str:
         """Solves the recursive replacement constraint where a blocked word is stripped once.
@@ -27,27 +52,15 @@ class TransformationConstraintSolver:
     def solve_unicode_normalization_constraint(target_char: str) -> List[str]:
         """Solves the unicode normalization constraint mapping characters back to ASCII equivalents.
         
-        For example: 's' can be bypassed using Unicode character U+017F (Latin Small Letter Long S) 
-        which normalizes to 's' under compatibility decomposition (NFKD).
+        Uses a dynamically generated cache based on compatibility decomposition (NFKD).
         """
-        mapping = {
-            's': ['\u017f', '\u24da'],
-            'k': ['\u212a', '\u24de'],
-            'i': ['\u24d8', '\u0131'],
-            'a': ['\u24d0', '\u1d43'],
-            'c': ['\u24d2', '\u1d9c'],
-            'o': ['\u24de', '\u1d52'],
-            'd': ['\u24d3', '\u1d48'],
-            'e': ['\u24d4', '\u1d49'],
-            'r': ['\u24e1', '\u02b3'],
-            'p': ['\u24df', '\u1d56'],
-            't': ['\u24e3', '\u1d57'],
-            '<': ['\ufe64', '\uff1c'],
-            '>': ['\ufe65', '\uff1e'],
-            '"': ['\u201c', '\u201d', '\uff02'],
-            "'": ['\u2018', '\u2019', '\uff07'],
-        }
-        return mapping.get(target_char.lower(), [target_char])
+        TransformationConstraintSolver._init_unicode_cache()
+        char_lower = target_char.lower()
+        if char_lower in TransformationConstraintSolver._unicode_cache:
+            options = TransformationConstraintSolver._unicode_cache[char_lower]
+            if options:
+                return options
+        return [target_char]
 
     @staticmethod
     def solve_sequence(payload: str, transformations: List[str]) -> str:
@@ -63,6 +76,8 @@ class TransformationConstraintSolver:
                 temp = []
                 for char in resolved:
                     options = TransformationConstraintSolver.solve_unicode_normalization_constraint(char)
-                    temp.append(options[0])  # Pick the primary bypass candidate
+                    # Use a random choice or the first bypass option to increase mutation variance
+                    import random
+                    temp.append(random.choice(options) if options else char)
                 resolved = "".join(temp)
         return resolved
