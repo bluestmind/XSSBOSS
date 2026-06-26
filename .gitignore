@@ -66,3 +66,14 @@ yarn-error.log*
 # OS files
 .DS_Store
 Thumbs.db
+
+# Internal docs & presentation files
+xss-lab/BUG_BOUNTY_READINESS.md
+xss-lab/IMPLEMENTATION.md
+xss-lab/IMPLEMENTATION_REPORT.md
+xss-lab/MODERN_XSS_TECHNIQUE_AUDIT.md
+xss-lab/HACKATHON_GUIDE.md
+
+# Local helper scripts
+xss-lab/tools/extract_ywh_tokens.py
+
