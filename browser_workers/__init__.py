@@ -1,0 +1,2 @@
+"""Browser workers package."""
+

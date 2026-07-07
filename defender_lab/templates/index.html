@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Defender Shield - Security Command Center</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        cyber: {
+                            bg: '#080C14',
+                            card: '#101626',
+                            border: '#1F293D',
+                            glow: '#00F0FF',
+                            accent: '#6366F1',
+                            success: '#10B981',
+                            danger: '#EF4444'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Outfit', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'Fira Code', 'monospace']
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Google Fonts Outfit & JetBrains Mono -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <!-- React & ReactDOM CDN -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <!-- Babel CDN for compiling JSX in browser -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Lucide Icons CDN -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body {
+            background-color: #080c14;
+            color: #f3f4f6;
+            font-family: 'Outfit', sans-serif;
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.1) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(0, 240, 255, 0.08) 0px, transparent 50%);
+        }
+        /* Custom glassmorphism styles */
+        .glass-panel {
+            backdrop-filter: blur(12px);
+            background: rgba(16, 22, 38, 0.75);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+        .glow-cyan {
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.25);
+        }
+        .glow-accent {
+            box-shadow: 0 0 15px rgba(99, 102, 241, 0.25);
+        }
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #080c14;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #1f293d;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #6366f1;
+        }
+    </style>
+</head>
+<body class="min-h-screen">
+
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // Header Component
+        function Header() {
+            return (
+                <header class="border-b border-cyber-border glass-panel sticky top-0 z-50 px-6 py-4 flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-lg bg-gradient-to-tr from-cyber-accent to-cyber-glow flex items-center justify-center glow-cyan">
+                            <i data-lucide="shield-check" class="text-white w-6 h-6"></i>
+                        </div>
+                        <div>
+                            <h1 class="text-xl font-bold tracking-tight bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">DEFENDER SHIELD</h1>
+                            <p class="text-xs text-cyan-400 font-mono tracking-widest uppercase">Cybersecurity Command Console</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-4">
+                        <div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-950/50 border border-emerald-500/30 text-emerald-400 text-xs font-mono">
+                            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                            ACTIVE PROTECTION ENFORCED
+                        </div>
+                        <div class="text-xs text-gray-500 font-mono">Port: 8085</div>
+                    </div>
+                </header>
+            );
+        }
+
+        function App() {
+            const [activeTab, setActiveTab] = useState('dashboard');
+            const [logs, setLogs] = useState([]);
+            const [cspReports, setCspReports] = useState([]);
+            const [vMessages, setVMessages] = useState([]);
+            const [sMessages, setSMessages] = useState([]);
+            const [newMsg, setNewMsg] = useState({ name: '', message: '' });
+            const [isSubmitting, setIsSubmitting] = useState(false);
+            const [xssInput, setXssInput] = useState("<script>alert('XSS')</script>");
+
+            // Fetch state from FastAPI backend
+            const fetchData = async () => {
+                try {
+                    const response = await fetch('/api/logs');
+                    const data = await response.json();
+                    setLogs(data.logs || []);
+                    setCspReports(data.csp_reports || []);
+                    setVMessages(data.vulnerable_messages || []);
+                    setSMessages(data.secure_messages || []);
+                } catch (error) {
+                    console.error("Error fetching logs:", error);
+                }
+            };
+
+            useEffect(() => {
+                fetchData();
+                const interval = setInterval(fetchData, 2000);
+                return () => clearInterval(interval);
+            }, []);
+
+            useEffect(() => {
+                // Initialize Lucide icons on render/tab switch
+                if (window.lucide) {
+                    window.lucide.createIcons();
+                }
+            }, [activeTab, logs, cspReports]);
+
+            const submitGuestbook = async (mode) => {
+                if (!newMsg.name || !newMsg.message) return;
+                setIsSubmitting(true);
+                const formData = new FormData();
+                formData.append('name', newMsg.name);
+                formData.append('message', newMsg.message);
+
+                try {
+                    const endpoint = mode === 'secure' ? '/api/guestbook/secure' : '/api/guestbook/vulnerable';
+                    await fetch(endpoint, {
+                        method: 'POST',
+                        body: formData
+                    });
+                    setNewMsg({ name: '', message: '' });
+                    fetchData();
+                } catch (error) {
+                    console.error("Error submitting guestbook:", error);
+                } finally {
+                    setIsSubmitting(false);
+                }
+            };
+
+            return (
+                <div class="min-h-screen flex flex-col">
+                    <Header />
+
+                    <div class="flex-1 flex flex-col md:flex-row">
+                        {/* Sidebar Navigation */}
+                        <aside class="w-full md:w-64 border-r border-cyber-border glass-panel p-4 flex flex-col gap-2">
+                            <button 
+                                onClick={() => setActiveTab('dashboard')}
+                                class={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-all ${activeTab === 'dashboard' ? 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/30' : 'text-gray-400 hover:text-white hover:bg-gray-800/40'}`}
+                            >
+                                <i data-lucide="layout-dashboard" class="w-5 h-5"></i>
+                                <span>Security Dashboard</span>
+                            </button>
+                            <button 
+                                onClick={() => setActiveTab('playground')}
+                                class={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-all ${activeTab === 'playground' ? 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/30' : 'text-gray-400 hover:text-white hover:bg-gray-800/40'}`}
+                            >
+                                <i data-lucide="play-circle" class="w-5 h-5"></i>
+                                <span>Vulnerability Playground</span>
+                            </button>
+                            <button 
+                                onClick={() => setActiveTab('guestbook')}
+                                class={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-all ${activeTab === 'guestbook' ? 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/30' : 'text-gray-400 hover:text-white hover:bg-gray-800/40'}`}
+                            >
+                                <i data-lucide="message-square" class="w-5 h-5"></i>
+                                <span>Stored XSS Showcase</span>
+                            </button>
+                            <button 
+                                onClick={() => setActiveTab('logs')}
+                                class={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-all relative ${activeTab === 'logs' ? 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/30' : 'text-gray-400 hover:text-white hover:bg-gray-800/40'}`}
+                            >
+                                <i data-lucide="terminal" class="w-5 h-5"></i>
+                                <span>Real-Time Logs</span>
+                                {cspReports.length > 0 && (
+                                    <span class="absolute right-3 top-3 px-1.5 py-0.5 rounded-full bg-red-600 text-white text-[10px] font-mono leading-none animate-pulse">
+                                        {cspReports.length}
+                                    </span>
+                                )}
+                            </button>
+                        </aside>
+
+                        {/* Main Work Area */}
+                        <main class="flex-1 p-6 overflow-y-auto">
+                            
+                            {/* TAB 1: DASHBOARD */}
+                            {activeTab === 'dashboard' && (
+                                <div class="space-y-6">
+                                    <div class="flex flex-col lg:flex-row items-start justify-between gap-4 border-b border-cyber-border pb-4">
+                                        <div>
+                                            <h2 class="text-2xl font-bold tracking-tight text-white">Active Defense Controls</h2>
+                                            <p class="text-gray-400 text-sm">Review safety layers implemented on the secure endpoints.</p>
+                                        </div>
+                                    </div>
+
+                                    {/* Security Controls Grid */}
+                                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                                        <div class="glass-panel p-5 rounded-xl flex flex-col justify-between glow-cyan">
+                                            <div class="flex items-center justify-between mb-4">
+                                                <span class="text-xs text-cyan-400 font-mono tracking-widest">LAYER 01</span>
+                                                <i data-lucide="shield-alert" class="text-cyan-400 w-5 h-5"></i>
+                                            </div>
+                                            <div>
+                                                <h3 class="font-bold text-white mb-1">Content Security Policy</h3>
+                                                <p class="text-xs text-gray-400 leading-relaxed mb-3">Enforces strict script execution boundaries, locking down execution origins.</p>
+                                            </div>
+                                            <div class="text-emerald-400 text-xs font-mono bg-emerald-950/40 border border-emerald-500/20 px-2 py-1 rounded w-fit uppercase">Strict CSP Active</div>
+                                        </div>
+
+                                        <div class="glass-panel p-5 rounded-xl flex flex-col justify-between glow-accent">
+                                            <div class="flex items-center justify-between mb-4">
+                                                <span class="text-xs text-indigo-400 font-mono tracking-widest">LAYER 02</span>
+                                                <i data-lucide="code" class="text-indigo-400 w-5 h-5"></i>
+                                            </div>
+                                            <div>
+                                                <h3 class="font-bold text-white mb-1">HTML Output Encoding</h3>
+                                                <p class="text-xs text-gray-400 leading-relaxed mb-3">Converts characters like &lt;, &gt;, &quot;, and &apos; into neutral HTML entities.</p>
+                                            </div>
+                                            <div class="text-emerald-400 text-xs font-mono bg-emerald-950/40 border border-emerald-500/20 px-2 py-1 rounded w-fit uppercase">HTML Escaping Enabled</div>
+                                        </div>
+
+                                        <div class="glass-panel p-5 rounded-xl flex flex-col justify-between">
+                                            <div class="flex items-center justify-between mb-4">
+                                                <span class="text-xs text-purple-400 font-mono tracking-widest">LAYER 03</span>
+                                                <i data-lucide="cookie" class="text-purple-400 w-5 h-5"></i>
+                                            </div>
+                                            <div>
+                                                <h3 class="font-bold text-white mb-1">HttpOnly Session Rules</h3>
+                                                <p class="text-xs text-gray-400 leading-relaxed mb-3">Hides critical cookies from document.cookie, blocking XSS token theft.</p>
+                                            </div>
+                                            <div class="text-emerald-400 text-xs font-mono bg-emerald-950/40 border border-emerald-500/20 px-2 py-1 rounded w-fit uppercase">HttpOnly Enforced</div>
+                                        </div>
+
+                                        <div class="glass-panel p-5 rounded-xl flex flex-col justify-between">
+                                            <div class="flex items-center justify-between mb-4">
+                                                <span class="text-xs text-pink-400 font-mono tracking-widest">LAYER 04</span>
+                                                <i data-lucide="fingerprint" class="text-pink-400 w-5 h-5"></i>
+                                            </div>
+                                            <div>
+                                                <h3 class="font-bold text-white mb-1">Trusted Types Policy</h3>
+                                                <p class="text-xs text-gray-400 leading-relaxed mb-3">Enforces programmatic DOM boundaries, rejecting unsafe string assignments to sinks.</p>
+                                            </div>
+                                            <div class="text-emerald-400 text-xs font-mono bg-emerald-950/40 border border-emerald-500/20 px-2 py-1 rounded w-fit uppercase">TT Injection Guard</div>
+                                        </div>
+                                    </div>
+
+                                    {/* Test Targets Overview */}
+                                    <div class="glass-panel rounded-xl p-6">
+                                        <h3 class="text-lg font-bold text-white mb-4">Crawler-Discoverable Audit Targets</h3>
+                                        <div class="overflow-x-auto">
+                                            <table class="w-full text-left border-collapse text-sm">
+                                                <thead>
+                                                    <tr class="border-b border-gray-800 text-gray-400 font-semibold font-mono text-xs uppercase tracking-wider">
+                                                        <th class="py-3 px-4">Attack Vector / Context</th>
+                                                        <th class="py-3 px-4">Vulnerable Endpoint</th>
+                                                        <th class="py-3 px-4">Defended Endpoint</th>
+                                                        <th class="py-3 px-4">Protection Mechanism</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody class="divide-y divide-gray-800/50">
+                                                    <tr>
+                                                        <td class="py-4 px-4 font-medium text-white">HTML Reflection</td>
+                                                        <td class="py-4 px-4 font-mono text-xs text-red-400"><a href="/vulnerable/html?q=test" target="_blank" class="hover:underline">/vulnerable/html?q=</a></td>
+                                                        <td class="py-4 px-4 font-mono text-xs text-emerald-400"><a href="/secure/html?q=test" target="_blank" class="hover:underline">/secure/html?q=</a></td>
+                                                        <td class="py-4 px-4 text-gray-400">HTML Entity Encoding + Strict CSP</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td class="py-4 px-4 font-medium text-white">Attribute Breakout</td>
+                                                        <td class="py-4 px-4 font-mono text-xs text-red-400"><a href="/vulnerable/attr?name=test" target="_blank" class="hover:underline">/vulnerable/attr?name=</a></td>
+                                                        <td class="py-4 px-4 font-mono text-xs text-emerald-400"><a href="/secure/attr?name=test" target="_blank" class="hover:underline">/secure/attr?name=</a></td>
+                                                        <td class="py-4 px-4 text-gray-400">Attribute Quote Neutralization</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td class="py-4 px-4 font-medium text-white">JavaScript Script Block</td>
+                                                        <td class="py-4 px-4 font-mono text-xs text-red-400"><a href="/vulnerable/js?term=test" target="_blank" class="hover:underline">/vulnerable/js?term=</a></td>
+                                                        <td class="py-4 px-4 font-mono text-xs text-emerald-400"><a href="/secure/js?term=test" target="_blank" class="hover:underline">/secure/js?term=</a></td>
+                                                        <td class="py-4 px-4 text-gray-400">JSON String Escaping + &lt;/script&gt; neutralization</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td class="py-4 px-4 font-medium text-white">DOM innerHTML Sink</td>
+                                                        <td class="py-4 px-4 font-mono text-xs text-red-400"><a href="/vulnerable/dom?next=test" target="_blank" class="hover:underline">/vulnerable/dom?next=</a></td>
+                                                        <td class="py-4 px-4 font-mono text-xs text-emerald-400"><a href="/secure/dom?next=test" target="_blank" class="hover:underline">/secure/dom?next=</a></td>
+                                                        <td class="py-4 px-4 text-gray-400">textContent binding + Trusted Types Policy</td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* TAB 2: INTERACTIVE PLAYGROUND */}
+                            {activeTab === 'playground' && (
+                                <div class="space-y-6">
+                                    <div>
+                                        <h2 class="text-2xl font-bold tracking-tight text-white">Interactive Vulnerability Playground</h2>
+                                        <p class="text-gray-400 text-sm">Simulate XSS payloads and witness how secure configurations neutralize execution compared to vulnerable versions.</p>
+                                    </div>
+
+                                    <div class="glass-panel p-6 rounded-xl space-y-4">
+                                        <div class="flex flex-col gap-2">
+                                            <label class="text-sm font-bold text-gray-300 font-mono">Test XSS Payload</label>
+                                            <textarea 
+                                                value={xssInput}
+                                                onChange={(e) => setXssInput(e.target.value)}
+                                                rows="3"
+                                                class="w-full bg-[#080c14] border border-cyber-border rounded-lg p-3 text-sm font-mono text-emerald-400 focus:outline-none focus:border-cyan-400"
+                                            />
+                                        </div>
+
+                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            {/* HTML reflection test */}
+                                            <div class="border border-gray-800 rounded-lg p-4 bg-gray-900/30 space-y-3">
+                                                <h4 class="font-bold text-white font-mono text-sm border-b border-gray-800 pb-2">HTML Reflection Context</h4>
+                                                <div class="flex gap-2">
+                                                    <a 
+                                                        href={`/vulnerable/html?q=${encodeURIComponent(xssInput)}`} 
+                                                        target="_blank" 
+                                                        class="flex-1 flex items-center justify-center gap-2 bg-red-950/40 border border-red-500/30 text-red-400 px-3 py-2 rounded text-xs hover:bg-red-950/60 font-semibold"
+                                                    >
+                                                        <i data-lucide="zap" class="w-4 h-4"></i>
+                                                        Test Vulnerable
+                                                    </a>
+                                                    <a 
+                                                        href={`/secure/html?q=${encodeURIComponent(xssInput)}`} 
+                                                        target="_blank" 
+                                                        class="flex-1 flex items-center justify-center gap-2 bg-emerald-950/40 border border-emerald-500/30 text-emerald-400 px-3 py-2 rounded text-xs hover:bg-emerald-950/60 font-semibold"
+                                                    >
+                                                        <i data-lucide="shield" class="w-4 h-4"></i>
+                                                        Test Secure
+                                                    </a>
+                                                </div>
+                                            </div>
+
+                                            {/* Attribute Context */}
+                                            <div class="border border-gray-800 rounded-lg p-4 bg-gray-900/30 space-y-3">
+                                                <h4 class="font-bold text-white font-mono text-sm border-b border-gray-800 pb-2">Attribute Breakout Context</h4>
+                                                <div class="flex gap-2">
+                                                    <a 
+                                                        href={`/vulnerable/attr?name=${encodeURIComponent(xssInput)}`} 
+                                                        target="_blank" 
+                                                        class="flex-1 flex items-center justify-center gap-2 bg-red-950/40 border border-red-500/30 text-red-400 px-3 py-2 rounded text-xs hover:bg-red-950/60 font-semibold"
+                                                    >
+                                                        <i data-lucide="zap" class="w-4 h-4"></i>
+                                                        Test Vulnerable
+                                                    </a>
+                                                    <a 
+                                                        href={`/secure/attr?name=${encodeURIComponent(xssInput)}`} 
+                                                        target="_blank" 
+                                                        class="flex-1 flex items-center justify-center gap-2 bg-emerald-950/40 border border-emerald-500/30 text-emerald-400 px-3 py-2 rounded text-xs hover:bg-emerald-950/60 font-semibold"
+                                                    >
+                                                        <i data-lucide="shield" class="w-4 h-4"></i>
+                                                        Test Secure
+                                                    </a>
+                                                </div>
+                                            </div>
+
+                                            {/* Script Context */}
+                                            <div class="border border-gray-800 rounded-lg p-4 bg-gray-900/30 space-y-3">
+                                                <h4 class="font-bold text-white font-mono text-sm border-b border-gray-800 pb-2">JavaScript String Context</h4>
+                                                <div class="flex gap-2">
+                                                    <a 
+                                                        href={`/vulnerable/js?term=${encodeURIComponent(xssInput)}`} 
+                                                        target="_blank" 
+                                                        class="flex-1 flex items-center justify-center gap-2 bg-red-950/40 border border-red-500/30 text-red-400 px-3 py-2 rounded text-xs hover:bg-red-950/60 font-semibold"
+                                                    >
+                                                        <i data-lucide="zap" class="w-4 h-4"></i>
+                                                        Test Vulnerable
+                                                    </a>
+                                                    <a 
+                                                        href={`/secure/js?term=${encodeURIComponent(xssInput)}`} 
+                                                        target="_blank" 
+                                                        class="flex-1 flex items-center justify-center gap-2 bg-emerald-950/40 border border-emerald-500/30 text-emerald-400 px-3 py-2 rounded text-xs hover:bg-emerald-950/60 font-semibold"
+                                                    >
+                                                        <i data-lucide="shield" class="w-4 h-4"></i>
+                                                        Test Secure
+                                                    </a>
+                                                </div>
+                                            </div>
+
+                                            {/* DOM Context */}
+                                            <div class="border border-gray-800 rounded-lg p-4 bg-gray-900/30 space-y-3">
+                                                <h4 class="font-bold text-white font-mono text-sm border-b border-gray-800 pb-2">DOM innerHTML Context</h4>
+                                                <div class="flex gap-2">
+                                                    <a 
+                                                        href={`/vulnerable/dom?next=${encodeURIComponent(xssInput)}`} 
+                                                        target="_blank" 
+                                                        class="flex-1 flex items-center justify-center gap-2 bg-red-950/40 border border-red-500/30 text-red-400 px-3 py-2 rounded text-xs hover:bg-red-950/60 font-semibold"
+                                                    >
+                                                        <i data-lucide="zap" class="w-4 h-4"></i>
+                                                        Test Vulnerable
+                                                    </a>
+                                                    <a 
+                                                        href={`/secure/dom?next=${encodeURIComponent(xssInput)}`} 
+                                                        target="_blank" 
+                                                        class="flex-1 flex items-center justify-center gap-2 bg-emerald-950/40 border border-emerald-500/30 text-emerald-400 px-3 py-2 rounded text-xs hover:bg-emerald-950/60 font-semibold"
+                                                    >
+                                                        <i data-lucide="shield" class="w-4 h-4"></i>
+                                                        Test Secure
+                                                    </a>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* TAB 3: STORED XSS SHOWCASE */}
+                            {activeTab === 'guestbook' && (
+                                <div class="space-y-6">
+                                    <div>
+                                        <h2 class="text-2xl font-bold tracking-tight text-white">Stored XSS Showcase</h2>
+                                        <p class="text-gray-400 text-sm">Demonstrates how HTML payloads injected into datastores execute inside persistent listings without sanitization vs safely with HTML encoding.</p>
+                                    </div>
+
+                                    {/* Submission form */}
+                                    <div class="glass-panel p-6 rounded-xl grid grid-cols-1 md:grid-cols-3 gap-6">
+                                        <div class="md:col-span-1 space-y-4">
+                                            <h3 class="font-bold text-white">Submit New Guestbook Post</h3>
+                                            <div class="space-y-3 text-sm">
+                                                <div class="flex flex-col gap-1.5">
+                                                    <label class="text-gray-400">Author Name</label>
+                                                    <input 
+                                                        type="text" 
+                                                        value={newMsg.name}
+                                                        onChange={(e) => setNewMsg({...newMsg, name: e.target.value})}
+                                                        placeholder="Admin"
+                                                        class="bg-[#080c14] border border-cyber-border rounded p-2 focus:outline-none focus:border-cyan-400 text-white"
+                                                    />
+                                                </div>
+                                                <div class="flex flex-col gap-1.5">
+                                                    <label class="text-gray-400">Message / Payload</label>
+                                                    <textarea 
+                                                        value={newMsg.message}
+                                                        onChange={(e) => setNewMsg({...newMsg, message: e.target.value})}
+                                                        placeholder="<img src=x onerror=alert(1)>"
+                                                        rows="3"
+                                                        class="bg-[#080c14] border border-cyber-border rounded p-2 focus:outline-none focus:border-cyan-400 text-white font-mono"
+                                                    />
+                                                </div>
+                                                <div class="flex gap-2 pt-2">
+                                                    <button 
+                                                        onClick={() => submitGuestbook('vuln')}
+                                                        disabled={isSubmitting}
+                                                        class="flex-1 bg-red-900/60 border border-red-500/40 text-red-200 py-2 rounded text-xs hover:bg-red-900/80 font-bold transition-all disabled:opacity-50"
+                                                    >
+                                                        Post to Vulnerable
+                                                    </button>
+                                                    <button 
+                                                        onClick={() => submitGuestbook('secure')}
+                                                        disabled={isSubmitting}
+                                                        class="flex-1 bg-indigo-600 text-white py-2 rounded text-xs hover:bg-indigo-700 font-bold transition-all disabled:opacity-50"
+                                                    >
+                                                        Post to Secure
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Vulnerable guestbook panel */}
+                                        <div class="md:col-span-1 border border-red-500/20 bg-red-950/10 rounded-xl p-4 flex flex-col">
+                                            <div class="flex items-center gap-2 border-b border-red-500/20 pb-2 mb-3">
+                                                <span class="w-2.5 h-2.5 rounded-full bg-red-500"></span>
+                                                <h4 class="font-bold text-red-400 text-sm">Vulnerable Guestbook List</h4>
+                                            </div>
+                                            <div class="flex-1 overflow-y-auto max-h-[300px] space-y-3">
+                                                {vMessages.map((m, i) => (
+                                                    <div key={i} class="bg-[#151218] border border-red-950/50 p-3 rounded text-xs">
+                                                        <div class="flex justify-between text-gray-500 font-mono mb-1">
+                                                            <span>Author: {m.name}</span>
+                                                            <span>#{i+1}</span>
+                                                        </div>
+                                                        {/* Vulnerable: Renders input raw using dangerouslySetInnerHTML */}
+                                                        <div 
+                                                            class="text-gray-200" 
+                                                            dangerouslySetInnerHTML={{ __html: m.message }} 
+                                                        />
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {/* Secure guestbook panel */}
+                                        <div class="md:col-span-1 border border-emerald-500/20 bg-emerald-950/10 rounded-xl p-4 flex flex-col">
+                                            <div class="flex items-center gap-2 border-b border-emerald-500/20 pb-2 mb-3">
+                                                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                                <h4 class="font-bold text-emerald-400 text-sm">Secure Guestbook List</h4>
+                                            </div>
+                                            <div class="flex-1 overflow-y-auto max-h-[300px] space-y-3">
+                                                {sMessages.map((m, i) => (
+                                                    <div key={i} class="bg-[#121a1b] border border-emerald-950/50 p-3 rounded text-xs">
+                                                        <div class="flex justify-between text-gray-500 font-mono mb-1">
+                                                            <span>Author: {m.name}</span>
+                                                            <span>#{i+1}</span>
+                                                        </div>
+                                                        {/* Secure: Standard JSX text binding (React escapes it automatically) */}
+                                                        <div class="text-gray-200 font-sans whitespace-pre-wrap">{m.message}</div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* TAB 4: LOGS */}
+                            {activeTab === 'logs' && (
+                                <div class="space-y-6">
+                                    <div class="flex justify-between items-center">
+                                        <div>
+                                            <h2 class="text-2xl font-bold tracking-tight text-white">Real-Time Security Logging</h2>
+                                            <p class="text-gray-400 text-sm">Observe telemetry records, block alerts, and browser CSP report callbacks.</p>
+                                        </div>
+                                        <button 
+                                            onClick={fetchData}
+                                            class="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 text-white px-3 py-2 rounded text-xs font-mono border border-gray-700"
+                                        >
+                                            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                                            REFRESH
+                                        </button>
+                                    </div>
+
+                                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                        {/* Requests logs */}
+                                        <div class="glass-panel p-5 rounded-xl flex flex-col h-[500px]">
+                                            <h3 class="font-bold text-white mb-3 flex items-center gap-2">
+                                                <i data-lucide="globe" class="text-cyan-400 w-4 h-4"></i>
+                                                Access Requests Log
+                                            </h3>
+                                            <div class="flex-1 overflow-y-auto space-y-2 font-mono text-[11px] pr-2">
+                                                {logs.length === 0 ? (
+                                                    <div class="text-gray-600 text-center py-20">No request telemetry recorded yet...</div>
+                                                ) : (
+                                                    logs.map((l, i) => (
+                                                        <div key={i} class="p-2 border-b border-gray-800/40 flex items-start justify-between gap-3 hover:bg-gray-800/20">
+                                                            <div class="flex items-start gap-2">
+                                                                <span class="text-indigo-400">{l.timestamp}</span>
+                                                                <span class={`px-1 py-0.5 rounded text-[9px] font-bold ${l.method === 'POST' ? 'bg-purple-900/60 text-purple-300' : 'bg-blue-900/60 text-blue-300'}`}>{l.method}</span>
+                                                                <span class="text-gray-300 truncate max-w-[200px] md:max-w-xs">{l.path}</span>
+                                                            </div>
+                                                            <div class="text-right">
+                                                                <span class={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                                                                    l.status === 'VULNERABLE' ? 'bg-red-950 text-red-400 border border-red-800/30' :
+                                                                    l.status === 'PROTECTED' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/30' :
+                                                                    'bg-gray-800 text-gray-400'
+                                                                }`}>{l.status}</span>
+                                                                <div class="text-[9px] text-gray-500 mt-0.5 truncate max-w-[120px]">{l.details}</div>
+                                                            </div>
+                                                        </div>
+                                                    ))
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* CSP Reports */}
+                                        <div class="glass-panel p-5 rounded-xl flex flex-col h-[500px] border border-red-500/10">
+                                            <h3 class="font-bold text-white mb-3 flex items-center gap-2">
+                                                <i data-lucide="alert-octagon" class="text-red-400 w-4 h-4"></i>
+                                                CSP Violation Telemetry (Blocked Executions)
+                                            </h3>
+                                            <div class="flex-1 overflow-y-auto space-y-2 font-mono text-[11px] pr-2">
+                                                {cspReports.length === 0 ? (
+                                                    <div class="text-gray-600 text-center py-20">No Content Security Policy violations detected. System fully secure.</div>
+                                                ) : (
+                                                    cspReports.map((r, i) => (
+                                                        <div key={i} class="p-3 bg-red-950/10 border border-red-900/20 rounded space-y-1.5">
+                                                            <div class="flex justify-between items-center text-[10px]">
+                                                                <span class="text-red-400 font-bold">VIOLATION DETECTED</span>
+                                                                <span class="text-gray-500">{r.timestamp}</span>
+                                                            </div>
+                                                            <div>
+                                                                <span class="text-gray-400">Blocked URI:</span> <span class="text-red-300 font-semibold">{r.blocked_uri}</span>
+                                                            </div>
+                                                            <div>
+                                                                <span class="text-gray-400">Violated Directive:</span> <span class="text-indigo-300 font-semibold">{r.violated_directive}</span>
+                                                            </div>
+                                                            <div class="text-[10px] text-gray-500 truncate">
+                                                                Policy: {r.original_policy}
+                                                            </div>
+                                                        </div>
+                                                    ))
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                        </main>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

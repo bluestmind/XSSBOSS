@@ -1,0 +1,141 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: xssboss
+      POSTGRES_USER: xssboss
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xssboss -d xssboss"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      target: api
+    environment: &backend-env
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql://xssboss:${POSTGRES_PASSWORD}@postgres:5432/xssboss
+      REDIS_URL: redis://redis:6379/0
+      ORCHESTRATION_MODE: celery
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY}
+      API_AUTH_TOKEN: ${API_AUTH_TOKEN:?set API_AUTH_TOKEN}
+      TENANT_API_TOKENS: ${TENANT_API_TOKENS:-}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?set ALLOWED_ORIGINS}
+      BURP_ENABLED: ${BURP_ENABLED:-False}
+      BURP_API_KEY: ${BURP_API_KEY:-}
+      LLM_ENABLED: ${LLM_ENABLED:-False}
+      BROWSER_LEASE_SECONDS: ${BROWSER_LEASE_SECONDS:-900}
+      CELERY_VISIBILITY_TIMEOUT: ${CELERY_VISIBILITY_TIMEOUT:-7200}
+      AUDIT_MODE: celery
+    volumes: &evidence-volumes
+      - reports:/app/reports
+      - screenshots:/app/screenshots
+      - evidence:/app/evidence
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  orchestrator:
+    build:
+      context: .
+      target: api
+    command: ["celery", "-A", "backend_api.task_queue:task_app", "worker", "-Q", "orchestration,maintenance", "--concurrency=2", "--loglevel=INFO"]
+    environment: *backend-env
+    volumes: *evidence-volumes
+    depends_on:
+      api: {condition: service_healthy}
+
+  browser-worker:
+    build:
+      context: .
+      target: browser
+    environment: *backend-env
+    volumes: *evidence-volumes
+    shm_size: 2gb
+    depends_on:
+      api: {condition: service_healthy}
+
+  audit-worker:
+    build:
+      context: .
+      target: api
+    command: ["celery", "-A", "backend_api.task_queue:task_app", "worker", "-Q", "audit", "--concurrency=1", "--loglevel=INFO"]
+    environment: *backend-env
+    volumes: *evidence-volumes
+    depends_on:
+      api: {condition: service_healthy}
+
+  scheduler:
+    build:
+      context: .
+      target: api
+    command: ["celery", "-A", "backend_api.task_queue:task_app", "beat", "--loglevel=INFO"]
+    environment: *backend-env
+    depends_on:
+      api: {condition: service_healthy}
+
+  ui:
+    build:
+      context: .
+      target: ui
+    ports:
+      - "8080:80"
+    environment:
+      API_AUTH_TOKEN: ${API_AUTH_TOKEN:?set API_AUTH_TOKEN}
+    depends_on:
+      api: {condition: service_healthy}
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    profiles: [observability]
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus"]
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/xssboss-alerts.yml:/etc/prometheus/xssboss-alerts.yml:ro
+      - prometheus-data:/prometheus
+    ports: ["9090:9090"]
+    depends_on:
+      api: {condition: service_healthy}
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    profiles: [observability]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports: ["3001:3000"]
+    depends_on: [prometheus]
+
+volumes:
+  postgres-data:
+  redis-data:
+  reports:
+  screenshots:
+  evidence:
+  prometheus-data:
+  grafana-data:
