@@ -1,0 +1,145 @@
+/** Global styles — XSS Boss Attack Console */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    background-color: #070A11;
+    color-scheme: dark;
+  }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background-color: #0A0E17;
+    color: #E8EDF8;
+    font-family: '"IBM Plex Sans"', ui-sans-serif, system-ui, sans-serif;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'ss01';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  ::selection {
+    background: rgba(123, 104, 255, 0.35);
+    color: #fff;
+  }
+  code, pre {
+    font-family: '"JetBrains Mono"', ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  /* Native form controls default to legible console colors even before per-element classes */
+  input, textarea, select {
+    color: inherit;
+    accent-color: #7B68FF;
+  }
+  input::placeholder, textarea::placeholder {
+    color: #5D6E90;
+  }
+  select option {
+    background-color: #0E1523;
+    color: #E8EDF8;
+  }
+}
+
+@layer components {
+  /* Glass panel — the core surface of the console */
+  .panel {
+    @apply relative rounded-2xl border border-carbon-700/70 bg-carbon-800/60 backdrop-blur-xl shadow-panel;
+  }
+  .panel-header {
+    @apply flex flex-wrap items-center justify-between gap-3 border-b border-carbon-700/60 px-5 py-4;
+  }
+  .eyebrow {
+    @apply text-[11px] font-semibold uppercase tracking-[0.24em] text-carbon-400;
+  }
+
+  /* Buttons */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold tracking-tight transition duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-carbon-900 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-primary {
+    @apply text-white bg-gradient-to-r from-brand-500 to-fuchsia-500 shadow-glow-brand hover:brightness-110 active:brightness-95;
+  }
+  .btn-ghost {
+    @apply text-carbon-200 border border-carbon-600 bg-carbon-800/50 hover:border-carbon-500 hover:bg-carbon-750 hover:text-carbon-100;
+  }
+  .btn-danger {
+    @apply text-white bg-gradient-to-r from-rose-600 to-rose-500 shadow-glow-rose hover:brightness-110;
+  }
+  .btn-success {
+    @apply text-white bg-gradient-to-r from-emerald-600 to-emerald-500 hover:brightness-110;
+  }
+
+  /* Inputs */
+  .field {
+    @apply w-full rounded-xl border border-carbon-600 bg-carbon-950/70 px-4 py-3 text-sm text-carbon-100 placeholder-carbon-500 transition focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/25;
+  }
+
+  /* Terminal / code surface */
+  .terminal {
+    @apply rounded-lg border border-carbon-700 bg-carbon-950/80 font-mono text-carbon-100;
+  }
+}
+
+@layer utilities {
+  /* Ambient grid — cast behind the whole app */
+  .grid-overlay {
+    background-image:
+      linear-gradient(to right, rgba(123, 104, 255, 0.06) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(123, 104, 255, 0.06) 1px, transparent 1px);
+    background-size: 46px 46px;
+    -webkit-mask-image: radial-gradient(ellipse 90% 60% at 50% -5%, #000 35%, transparent 100%);
+    mask-image: radial-gradient(ellipse 90% 60% at 50% -5%, #000 35%, transparent 100%);
+  }
+
+  /* Moving scan sweep — reserved for live/active surfaces only */
+  .scanline {
+    position: relative;
+    overflow: hidden;
+  }
+  .scanline::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 42%;
+    background: linear-gradient(to bottom, transparent, rgba(123, 104, 255, 0.10), transparent);
+    animation: scan 3.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    pointer-events: none;
+  }
+
+  .text-glow-brand { text-shadow: 0 0 22px rgba(123, 104, 255, 0.55); }
+  .text-glow-rose { text-shadow: 0 0 20px rgba(244, 63, 94, 0.5); }
+
+  .tabnum { font-variant-numeric: tabular-nums; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .scanline::after,
+    .animate-scan,
+    .animate-sheen,
+    .animate-pulse-soft,
+    .animate-blink,
+    .animate-spin-slow {
+      animation: none !important;
+    }
+  }
+}
+
+/* Scrollbar — themed to the console */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #0A0E17;
+}
+::-webkit-scrollbar-thumb {
+  background: #26324c;
+  border: 2px solid #0A0E17;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a4a6b;
+}
+* {
+  scrollbar-color: #26324c #0A0E17;
+}

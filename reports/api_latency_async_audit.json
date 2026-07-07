@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "started_at": "2026-08-27T18:04:48.262255+00:00",
+  "finished_at": "2026-08-27T18:04:54.269651+00:00",
+  "requests": 1000,
+  "concurrency": 32,
+  "p50_ms": 121.099,
+  "p95_ms": 203.983,
+  "p99_ms": 241.829,
+  "max_ms": 284.89,
+  "budget_p95_ms": 300.0,
+  "errors": 0,
+  "status_counts": {
+    "200": 1000
+  },
+  "passed": true
+}

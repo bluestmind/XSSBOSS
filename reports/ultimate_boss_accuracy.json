@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "manifest": "F:\\projects\\XSSBOSS\\tools\\hard_lab_manifest.json",
+  "cases": [
+    {
+      "slug": "ultimate_boss",
+      "detected": false,
+      "attempts": 8,
+      "last_test_case_id": 8,
+      "attempt_results": [
+        {
+          "test_case_id": 2,
+          "result": {
+            "test_case_id": 2,
+            "execution_id": 2,
+            "oracle_hit": false,
+            "duration_ms": 1643
+          }
+        },
+        {
+          "test_case_id": 4,
+          "result": {
+            "test_case_id": 4,
+            "execution_id": 3,
+            "oracle_hit": false,
+            "duration_ms": 1454
+          }
+        },
+        {
+          "test_case_id": 3,
+          "result": {
+            "test_case_id": 3,
+            "execution_id": 4,
+            "oracle_hit": false,
+            "duration_ms": 1426
+          }
+        },
+        {
+          "test_case_id": 6,
+          "result": {
+            "test_case_id": 6,
+            "execution_id": 5,
+            "oracle_hit": false,
+            "duration_ms": 1406
+          }
+        },
+        {
+          "test_case_id": 5,
+          "result": {
+            "test_case_id": 5,
+            "execution_id": 6,
+            "oracle_hit": false,
+            "duration_ms": 1424
+          }
+        },
+        {
+          "test_case_id": 7,
+          "result": {
+            "test_case_id": 7,
+            "execution_id": 7,
+            "oracle_hit": false,
+            "duration_ms": 1412
+          }
+        },
+        {
+          "test_case_id": 1,
+          "result": {
+            "test_case_id": 1,
+            "execution_id": 8,
+            "oracle_hit": false,
+            "duration_ms": 4432
+          }
+        },
+        {
+          "test_case_id": 8,
+          "result": {
+            "test_case_id": 8,
+            "execution_id": 9,
+            "oracle_hit": false,
+            "duration_ms": 1398
+          }
+        }
+      ]
+    }
+  ],
+  "metrics": {
+    "true_positive": 0,
+    "false_positive": 0,
+    "true_negative": 0,
+    "false_negative": 1,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0,
+    "complete": true,
+    "missing_cases": []
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "verified_at": "2026-08-27T17:58:25.377171+00:00",
+  "counts": {
+    "experiments": 100,
+    "test_cases": 10000,
+    "executions": 10000,
+    "run_stages": 500,
+    "evidence_artifacts": 4
+  },
+  "evidence": {
+    "total": 4,
+    "valid": 4,
+    "invalid": 0,
+    "passed": true,
+    "results": [
+      {
+        "artifact_id": 1,
+        "kind": "request",
+        "valid": true,
+        "expected_sha256": "31cdc54e11c2d478a907cb92a5389d211ae324277402f0452adfea6a240a2f13",
+        "actual_sha256": "31cdc54e11c2d478a907cb92a5389d211ae324277402f0452adfea6a240a2f13",
+        "expected_size": 109,
+        "actual_size": 109
+      },
+      {
+        "artifact_id": 2,
+        "kind": "response",
+        "valid": true,
+        "expected_sha256": "4027df4c6eda56fb5c10c826553bc8a88bbe405492758f5a8a3c04181499715f",
+        "actual_sha256": "4027df4c6eda56fb5c10c826553bc8a88bbe405492758f5a8a3c04181499715f",
+        "expected_size": 135,
+        "actual_size": 135
+      },
+      {
+        "artifact_id": 3,
+        "kind": "execution_log",
+        "valid": true,
+        "expected_sha256": "59bd2aeb4c39a731d3e20ee17e6666de1630e7119aca4c1d4e37858ac2a91531",
+        "actual_sha256": "59bd2aeb4c39a731d3e20ee17e6666de1630e7119aca4c1d4e37858ac2a91531",
+        "expected_size": 20,
+        "actual_size": 20
+      },
+      {
+        "artifact_id": 4,
+        "kind": "dom_snapshot",
+        "valid": true,
+        "expected_sha256": "d19f0b41a10bef9cee0bc17bfc8d7c81057b49b8276fac730e013ad021dac4a2",
+        "actual_sha256": "d19f0b41a10bef9cee0bc17bfc8d7c81057b49b8276fac730e013ad021dac4a2",
+        "expected_size": 39,
+        "actual_size": 39
+      }
+    ]
+  },
+  "evidence_manifest": [
+    {
+      "experiment_id": 13,
+      "kind": "dom_snapshot",
+      "sha256": "d19f0b41a10bef9cee0bc17bfc8d7c81057b49b8276fac730e013ad021dac4a2",
+      "size_bytes": 39,
+      "uri": "13/dom_snapshot/d19f0b41a10bef9cee0bc17bfc8d7c81057b49b8276fac730e013ad021dac4a2.evidence"
+    },
+    {
+      "experiment_id": 13,
+      "kind": "execution_log",
+      "sha256": "59bd2aeb4c39a731d3e20ee17e6666de1630e7119aca4c1d4e37858ac2a91531",
+      "size_bytes": 20,
+      "uri": "13/execution_log/59bd2aeb4c39a731d3e20ee17e6666de1630e7119aca4c1d4e37858ac2a91531.evidence"
+    },
+    {
+      "experiment_id": 13,
+      "kind": "request",
+      "sha256": "31cdc54e11c2d478a907cb92a5389d211ae324277402f0452adfea6a240a2f13",
+      "size_bytes": 109,
+      "uri": "13/request/31cdc54e11c2d478a907cb92a5389d211ae324277402f0452adfea6a240a2f13.evidence"
+    },
+    {
+      "experiment_id": 13,
+      "kind": "response",
+      "sha256": "4027df4c6eda56fb5c10c826553bc8a88bbe405492758f5a8a3c04181499715f",
+      "size_bytes": 135,
+      "uri": "13/response/4027df4c6eda56fb5c10c826553bc8a88bbe405492758f5a8a3c04181499715f.evidence"
+    }
+  ],
+  "comparisons": {},
+  "passed": true
+}

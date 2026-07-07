@@ -1,0 +1,21 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "panels": [
+    {"type": "stat", "title": "API Up", "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0}, "targets": [{"expr": "up{job=\"xssboss-api\"}"}]},
+    {"type": "timeseries", "title": "P95 API Latency", "gridPos": {"h": 8, "w": 10, "x": 4, "y": 0}, "targets": [{"expr": "histogram_quantile(0.95, sum by (le) (rate(xssboss_http_request_duration_seconds_bucket[5m])))", "legendFormat": "P95"}]},
+    {"type": "timeseries", "title": "Queue Depth", "gridPos": {"h": 8, "w": 10, "x": 14, "y": 0}, "targets": [{"expr": "xssboss_queue_depth", "legendFormat": "{{queue}}"}]},
+    {"type": "timeseries", "title": "Runs by Status", "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}, "targets": [{"expr": "xssboss_runs", "legendFormat": "{{status}}"}]},
+    {"type": "stat", "title": "Stale Execution Leases", "gridPos": {"h": 8, "w": 6, "x": 12, "y": 8}, "targets": [{"expr": "xssboss_execution_leases{state=\"stale\"}"}]},
+    {"type": "stat", "title": "Dependencies", "gridPos": {"h": 8, "w": 6, "x": 18, "y": 8}, "targets": [{"expr": "xssboss_dependency_up", "legendFormat": "{{dependency}}"}]},
+    {"type": "stat", "title": "Oldest Queued Case", "gridPos": {"h": 6, "w": 12, "x": 0, "y": 16}, "targets": [{"expr": "xssboss_oldest_queued_case_age_seconds"}]},
+    {"type": "stat", "title": "Oldest Active Run", "gridPos": {"h": 6, "w": 12, "x": 12, "y": 16}, "targets": [{"expr": "xssboss_oldest_active_run_age_seconds"}]}
+  ],
+  "schemaVersion": 39,
+  "tags": ["xssboss", "production"],
+  "templating": {"list": []},
+  "time": {"from": "now-6h", "to": "now"},
+  "title": "XSS Boss Production",
+  "uid": "xssboss-production",
+  "version": 1
+}

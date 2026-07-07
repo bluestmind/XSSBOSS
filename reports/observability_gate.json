@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "started_at": "2026-08-27T18:13:50.455549+00:00",
+  "passed": true,
+  "checks": {
+    "prometheus_content_type": true,
+    "request_counter": true,
+    "latency_histogram": true,
+    "all_durable_queues": true,
+    "run_statuses": true,
+    "execution_leases": true,
+    "stage_leases": true,
+    "queue_delay_slo": true,
+    "completion_slo": true,
+    "database_up": true,
+    "redis_up": true,
+    "no_target_labels": true
+  },
+  "metric_lines": 22,
+  "finished_at": "2026-08-27T18:13:52.864725+00:00"
+}

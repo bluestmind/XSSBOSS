@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "started_at": "2026-08-27T18:11:55.579590+00:00",
+  "passed": true,
+  "tenant_ids": {
+    "alpha": 8,
+    "beta": 9
+  },
+  "target_ids": {
+    "alpha": 8,
+    "beta": 9
+  },
+  "quota_statuses": [
+    200,
+    200,
+    429
+  ],
+  "audit": {
+    "alpha": {
+      "passed": true,
+      "checked": 8,
+      "head": "ef25ed60e01a5d0fff5db755b0069bafbfc29bcbb269d4cdf4564b7b7eb7bd78"
+    },
+    "beta": {
+      "passed": true,
+      "checked": 4,
+      "head": "4ebb95080da87c2f6a0e47a1715fca6310ecdb27064b634b954c7320b32de033"
+    }
+  },
+  "checks": {
+    "alpha_create": true,
+    "beta_create": true,
+    "alpha_sees_only_alpha": true,
+    "beta_sees_only_beta": true,
+    "cross_tenant_read_hidden": true,
+    "cross_tenant_update_hidden": true,
+    "static_requires_auth": true,
+    "alpha_own_artifact": true,
+    "beta_own_artifact": true,
+    "cross_tenant_artifact_hidden": true,
+    "tenant_quota": true,
+    "alpha_audit_chain": true,
+    "beta_audit_chain": true
+  },
+  "finished_at": "2026-08-27T18:11:58.965890+00:00"
+}

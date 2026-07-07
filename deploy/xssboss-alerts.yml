@@ -1,0 +1,45 @@
+groups:
+  - name: xssboss-production
+    rules:
+      - alert: XSSBossAPIDown
+        expr: up{job="xssboss-api"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: XSS Boss API is unavailable
+      - alert: XSSBossP95LatencyBudgetExceeded
+        expr: histogram_quantile(0.95, sum by (le) (rate(xssboss_http_request_duration_seconds_bucket[5m]))) > 0.3
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: API P95 latency exceeds 300 ms
+      - alert: XSSBossQueueBacklog
+        expr: max by (queue) (xssboss_queue_depth) > 10000
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: Durable queue backlog exceeds 10,000 messages
+      - alert: XSSBossStaleExecutionLease
+        expr: xssboss_execution_leases{state="stale"} > 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: Browser execution work has an expired lease
+      - alert: XSSBossQueueDelayBudgetExceeded
+        expr: xssboss_oldest_queued_case_age_seconds > 180
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: Oldest queued browser case exceeds the 180-second budget
+      - alert: XSSBossRunCompletionBudgetExceeded
+        expr: xssboss_oldest_active_run_age_seconds > 3600
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: An active scan run has exceeded the one-hour operational budget
+      - alert: XSSBossDependencyDown
+        expr: xssboss_dependency_up == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: XSS Boss database or Redis dependency is unavailable

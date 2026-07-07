@@ -1,0 +1,1 @@
+import{P as e}from"./dist.chunk.js";import{t}from"./ContentError.chunk.js";var n=t=>e(t)&&`_errorType`in t,r=e=>{if(n(e)){let{_errorType:n,error:r,info:i}=e;throw n===`ContentError`?new t(r,i):Error(r)}return e},i=e=>{let n;try{let{message:r,...i}=JSON.parse(e.message);n=new t(r,i)}catch{throw e}throw n};export{r as n,i as t};

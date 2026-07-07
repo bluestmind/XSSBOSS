@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "manifest": "F:\\projects\\XSSBOSS\\tools\\hard_lab_manifest.json",
+  "cases": [
+    {
+      "slug": "extreme_filter_bypass",
+      "detected": true,
+      "attempts": 1,
+      "last_test_case_id": 1,
+      "attempt_results": [
+        {
+          "test_case_id": 1,
+          "result": {
+            "test_case_id": 1,
+            "execution_id": 2,
+            "oracle_hit": true,
+            "duration_ms": 1431
+          }
+        }
+      ]
+    }
+  ],
+  "metrics": {
+    "true_positive": 1,
+    "false_positive": 0,
+    "true_negative": 0,
+    "false_negative": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "complete": true,
+    "missing_cases": []
+  }
+}

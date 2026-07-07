@@ -1,0 +1,33 @@
+2026/06/13-02:55:47.807 5c70 Reusing MANIFEST F:\projects\XSSBOSS\medium_scraper_profile\Default\Session Storage/MANIFEST-000001
+2026/06/13-02:55:47.807 5c70 Recovering log #3
+2026/06/13-02:55:47.808 5c70 Reusing old log F:\projects\XSSBOSS\medium_scraper_profile\Default\Session Storage/000003.log 
+2026/06/13-03:04:55.498 5c70 Level-0 table #5: started
+2026/06/13-03:04:55.509 5c70 Level-0 table #5: 28251 bytes OK
+2026/06/13-03:04:55.513 5c70 Delete type=0 #3
+2026/06/13-03:09:19.553 5300 Level-0 table #7: started
+2026/06/13-03:09:19.557 5300 Level-0 table #7: 29934 bytes OK
+2026/06/13-03:09:19.561 5300 Delete type=0 #4
+2026/06/13-03:13:13.420 5c70 Level-0 table #9: started
+2026/06/13-03:13:14.215 5c70 Level-0 table #9: 31054 bytes OK
+2026/06/13-03:13:14.232 5c70 Delete type=0 #6
+2026/06/13-03:17:31.747 5300 Level-0 table #11: started
+2026/06/13-03:17:31.752 5300 Level-0 table #11: 30451 bytes OK
+2026/06/13-03:17:31.755 5300 Delete type=0 #8
+2026/06/13-03:20:54.043 5300 Level-0 table #13: started
+2026/06/13-03:20:54.457 5300 Level-0 table #13: 29920 bytes OK
+2026/06/13-03:20:54.461 5300 Delete type=0 #10
+2026/06/13-03:22:58.666 5300 Level-0 table #15: started
+2026/06/13-03:22:58.673 5300 Level-0 table #15: 30168 bytes OK
+2026/06/13-03:22:58.677 5300 Delete type=0 #12
+2026/06/13-03:22:58.677 5300 Compacting 4@0 + 1@1 files
+2026/06/13-03:22:58.694 5300 Generated table #16@0: 60 keys, 10480 bytes
+2026/06/13-03:22:58.694 5300 Compacted 4@0 + 1@1 files => 10480 bytes
+2026/06/13-03:22:58.712 5300 compacted to: files[ 0 1 1 0 0 0 0 ]
+2026/06/13-03:22:58.721 5300 Delete type=2 #7
+2026/06/13-03:22:58.721 5300 Delete type=2 #9
+2026/06/13-03:22:58.722 5300 Delete type=2 #11
+2026/06/13-03:22:58.722 5300 Delete type=2 #13
+2026/06/13-03:22:58.722 5300 Delete type=2 #15
+2026/06/13-03:24:24.963 5300 Level-0 table #18: started
+2026/06/13-03:24:24.970 5300 Level-0 table #18: 33750 bytes OK
+2026/06/13-03:24:24.974 5300 Delete type=0 #14

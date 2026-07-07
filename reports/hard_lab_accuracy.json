@@ -1,0 +1,872 @@
+{
+  "schema_version": 1,
+  "manifest": "F:\\projects\\XSSBOSS\\tools\\hard_lab_manifest.json",
+  "cases": [
+    {
+      "slug": "html_raw",
+      "detected": true,
+      "attempts": 3,
+      "last_test_case_id": 3,
+      "attempt_results": [
+        {
+          "test_case_id": 1,
+          "result": {
+            "test_case_id": 1,
+            "execution_id": 4,
+            "oracle_hit": true,
+            "duration_ms": 1524
+          }
+        },
+        {
+          "test_case_id": 2,
+          "result": {
+            "test_case_id": 2,
+            "execution_id": 5,
+            "oracle_hit": true,
+            "duration_ms": 1447
+          }
+        },
+        {
+          "test_case_id": 3,
+          "result": {
+            "test_case_id": 3,
+            "execution_id": 6,
+            "oracle_hit": true,
+            "duration_ms": 1443
+          }
+        }
+      ]
+    },
+    {
+      "slug": "html_filter_bypass",
+      "detected": true,
+      "attempts": 8,
+      "last_test_case_id": 10,
+      "attempt_results": [
+        {
+          "test_case_id": 4,
+          "result": {
+            "test_case_id": 4,
+            "execution_id": 11,
+            "oracle_hit": true,
+            "duration_ms": 1564
+          }
+        },
+        {
+          "test_case_id": 7,
+          "result": {
+            "test_case_id": 7,
+            "execution_id": 13,
+            "oracle_hit": true,
+            "duration_ms": 1417
+          }
+        },
+        {
+          "test_case_id": 5,
+          "result": {
+            "test_case_id": 5,
+            "execution_id": 14,
+            "oracle_hit": true,
+            "duration_ms": 1493
+          }
+        },
+        {
+          "test_case_id": 6,
+          "result": {
+            "test_case_id": 6,
+            "execution_id": 15,
+            "oracle_hit": true,
+            "duration_ms": 1445
+          }
+        },
+        {
+          "test_case_id": 8,
+          "result": {
+            "test_case_id": 8,
+            "execution_id": 18,
+            "oracle_hit": true,
+            "duration_ms": 1385
+          }
+        },
+        {
+          "test_case_id": 9,
+          "result": {
+            "test_case_id": 9,
+            "execution_id": 20,
+            "oracle_hit": true,
+            "duration_ms": 1390
+          }
+        },
+        {
+          "test_case_id": 11,
+          "result": {
+            "test_case_id": 11,
+            "execution_id": 21,
+            "oracle_hit": true,
+            "duration_ms": 1423
+          }
+        },
+        {
+          "test_case_id": 10,
+          "result": {
+            "test_case_id": 10,
+            "execution_id": 22,
+            "oracle_hit": true,
+            "duration_ms": 1397
+          }
+        }
+      ]
+    },
+    {
+      "slug": "extreme_filter_bypass",
+      "detected": true,
+      "attempts": 8,
+      "last_test_case_id": 19,
+      "attempt_results": [
+        {
+          "test_case_id": 13,
+          "result": {
+            "test_case_id": 13,
+            "execution_id": 26,
+            "oracle_hit": true,
+            "duration_ms": 1556
+          }
+        },
+        {
+          "test_case_id": 12,
+          "result": {
+            "test_case_id": 12,
+            "execution_id": 27,
+            "oracle_hit": true,
+            "duration_ms": 1431
+          }
+        },
+        {
+          "test_case_id": 14,
+          "result": {
+            "test_case_id": 14,
+            "execution_id": 28,
+            "oracle_hit": true,
+            "duration_ms": 1433
+          }
+        },
+        {
+          "test_case_id": 15,
+          "result": {
+            "test_case_id": 15,
+            "execution_id": 29,
+            "oracle_hit": false,
+            "duration_ms": 4405
+          }
+        },
+        {
+          "test_case_id": 16,
+          "result": {
+            "test_case_id": 16,
+            "execution_id": 30,
+            "oracle_hit": false,
+            "duration_ms": 4395
+          }
+        },
+        {
+          "test_case_id": 18,
+          "result": {
+            "test_case_id": 18,
+            "execution_id": 31,
+            "oracle_hit": false,
+            "duration_ms": 4401
+          }
+        },
+        {
+          "test_case_id": 17,
+          "result": {
+            "test_case_id": 17,
+            "execution_id": 32,
+            "oracle_hit": false,
+            "duration_ms": 4397
+          }
+        },
+        {
+          "test_case_id": 19,
+          "result": {
+            "test_case_id": 19,
+            "execution_id": 33,
+            "oracle_hit": false,
+            "duration_ms": 4421
+          }
+        }
+      ]
+    },
+    {
+      "slug": "attr_quoted",
+      "detected": true,
+      "attempts": 1,
+      "last_test_case_id": 20,
+      "attempt_results": [
+        {
+          "test_case_id": 20,
+          "result": {
+            "test_case_id": 20,
+            "execution_id": 35,
+            "oracle_hit": true,
+            "duration_ms": 1468
+          }
+        }
+      ]
+    },
+    {
+      "slug": "attr_unquoted",
+      "detected": true,
+      "attempts": 3,
+      "last_test_case_id": 22,
+      "attempt_results": [
+        {
+          "test_case_id": 21,
+          "result": {
+            "test_case_id": 21,
+            "execution_id": 39,
+            "oracle_hit": true,
+            "duration_ms": 1647
+          }
+        },
+        {
+          "test_case_id": 23,
+          "result": {
+            "test_case_id": 23,
+            "execution_id": 40,
+            "oracle_hit": true,
+            "duration_ms": 1431
+          }
+        },
+        {
+          "test_case_id": 22,
+          "result": {
+            "test_case_id": 22,
+            "execution_id": 41,
+            "oracle_hit": true,
+            "duration_ms": 1440
+          }
+        }
+      ]
+    },
+    {
+      "slug": "js_string",
+      "detected": true,
+      "attempts": 8,
+      "last_test_case_id": 31,
+      "attempt_results": [
+        {
+          "test_case_id": 27,
+          "result": {
+            "test_case_id": 27,
+            "execution_id": 45,
+            "oracle_hit": true,
+            "duration_ms": 1800
+          }
+        },
+        {
+          "test_case_id": 25,
+          "result": {
+            "test_case_id": 25,
+            "execution_id": 46,
+            "oracle_hit": true,
+            "duration_ms": 1479
+          }
+        },
+        {
+          "test_case_id": 29,
+          "result": {
+            "test_case_id": 29,
+            "execution_id": 48,
+            "oracle_hit": true,
+            "duration_ms": 1450
+          }
+        },
+        {
+          "test_case_id": 24,
+          "result": {
+            "test_case_id": 24,
+            "execution_id": 49,
+            "oracle_hit": false,
+            "duration_ms": 4443
+          }
+        },
+        {
+          "test_case_id": 26,
+          "result": {
+            "test_case_id": 26,
+            "execution_id": 50,
+            "oracle_hit": false,
+            "duration_ms": 4441
+          }
+        },
+        {
+          "test_case_id": 28,
+          "result": {
+            "test_case_id": 28,
+            "execution_id": 51,
+            "oracle_hit": false,
+            "duration_ms": 4426
+          }
+        },
+        {
+          "test_case_id": 30,
+          "result": {
+            "test_case_id": 30,
+            "execution_id": 52,
+            "oracle_hit": false,
+            "duration_ms": 4425
+          }
+        },
+        {
+          "test_case_id": 31,
+          "result": {
+            "test_case_id": 31,
+            "execution_id": 53,
+            "oracle_hit": false,
+            "duration_ms": 4395
+          }
+        }
+      ]
+    },
+    {
+      "slug": "event_handler",
+      "detected": true,
+      "attempts": 3,
+      "last_test_case_id": 34,
+      "attempt_results": [
+        {
+          "test_case_id": 33,
+          "result": {
+            "test_case_id": 33,
+            "execution_id": 57,
+            "oracle_hit": true,
+            "duration_ms": 1524
+          }
+        },
+        {
+          "test_case_id": 32,
+          "result": {
+            "test_case_id": 32,
+            "execution_id": 58,
+            "oracle_hit": true,
+            "duration_ms": 1398
+          }
+        },
+        {
+          "test_case_id": 34,
+          "result": {
+            "test_case_id": 34,
+            "execution_id": 59,
+            "oracle_hit": false,
+            "duration_ms": 4412
+          }
+        }
+      ]
+    },
+    {
+      "slug": "json_script",
+      "detected": true,
+      "attempts": 8,
+      "last_test_case_id": 42,
+      "attempt_results": [
+        {
+          "test_case_id": 37,
+          "result": {
+            "test_case_id": 37,
+            "execution_id": 62,
+            "oracle_hit": true,
+            "duration_ms": 1577
+          }
+        },
+        {
+          "test_case_id": 35,
+          "result": {
+            "test_case_id": 35,
+            "execution_id": 63,
+            "oracle_hit": true,
+            "duration_ms": 1456
+          }
+        },
+        {
+          "test_case_id": 38,
+          "result": {
+            "test_case_id": 38,
+            "execution_id": 64,
+            "oracle_hit": false,
+            "duration_ms": 1430
+          }
+        },
+        {
+          "test_case_id": 41,
+          "result": {
+            "test_case_id": 41,
+            "execution_id": 66,
+            "oracle_hit": true,
+            "duration_ms": 1438
+          }
+        },
+        {
+          "test_case_id": 36,
+          "result": {
+            "test_case_id": 36,
+            "execution_id": 67,
+            "oracle_hit": false,
+            "duration_ms": 4431
+          }
+        },
+        {
+          "test_case_id": 39,
+          "result": {
+            "test_case_id": 39,
+            "execution_id": 68,
+            "oracle_hit": false,
+            "duration_ms": 4396
+          }
+        },
+        {
+          "test_case_id": 40,
+          "result": {
+            "test_case_id": 40,
+            "execution_id": 69,
+            "oracle_hit": false,
+            "duration_ms": 4413
+          }
+        },
+        {
+          "test_case_id": 42,
+          "result": {
+            "test_case_id": 42,
+            "execution_id": 70,
+            "oracle_hit": false,
+            "duration_ms": 4389
+          }
+        }
+      ]
+    },
+    {
+      "slug": "dom_sink",
+      "detected": true,
+      "attempts": 2,
+      "last_test_case_id": 43,
+      "attempt_results": [
+        {
+          "test_case_id": 44,
+          "result": {
+            "test_case_id": 44,
+            "execution_id": 75,
+            "oracle_hit": true,
+            "duration_ms": 4472
+          }
+        },
+        {
+          "test_case_id": 43,
+          "result": {
+            "test_case_id": 43,
+            "execution_id": 76,
+            "oracle_hit": false,
+            "duration_ms": 4412
+          }
+        }
+      ]
+    },
+    {
+      "slug": "post_body",
+      "detected": true,
+      "attempts": 3,
+      "last_test_case_id": 47,
+      "attempt_results": [
+        {
+          "test_case_id": 46,
+          "result": {
+            "test_case_id": 46,
+            "execution_id": 84,
+            "oracle_hit": true,
+            "duration_ms": 2114
+          }
+        },
+        {
+          "test_case_id": 45,
+          "result": {
+            "test_case_id": 45,
+            "execution_id": 85,
+            "oracle_hit": true,
+            "duration_ms": 1970
+          }
+        },
+        {
+          "test_case_id": 47,
+          "result": {
+            "test_case_id": 47,
+            "execution_id": 86,
+            "oracle_hit": true,
+            "duration_ms": 2034
+          }
+        }
+      ]
+    },
+    {
+      "slug": "post_json",
+      "detected": true,
+      "attempts": 8,
+      "last_test_case_id": 55,
+      "attempt_results": [
+        {
+          "test_case_id": 50,
+          "result": {
+            "test_case_id": 50,
+            "execution_id": 91,
+            "oracle_hit": false,
+            "duration_ms": 2121
+          }
+        },
+        {
+          "test_case_id": 51,
+          "result": {
+            "test_case_id": 51,
+            "execution_id": 92,
+            "oracle_hit": true,
+            "duration_ms": 2020
+          }
+        },
+        {
+          "test_case_id": 48,
+          "result": {
+            "test_case_id": 48,
+            "execution_id": 95,
+            "oracle_hit": false,
+            "duration_ms": 1957
+          }
+        },
+        {
+          "test_case_id": 49,
+          "result": {
+            "test_case_id": 49,
+            "execution_id": 93,
+            "oracle_hit": true,
+            "duration_ms": 1964
+          }
+        },
+        {
+          "test_case_id": 52,
+          "result": {
+            "test_case_id": 52,
+            "execution_id": 96,
+            "oracle_hit": false,
+            "duration_ms": 1938
+          }
+        },
+        {
+          "test_case_id": 53,
+          "result": {
+            "test_case_id": 53,
+            "execution_id": 97,
+            "oracle_hit": true,
+            "duration_ms": 2141
+          }
+        },
+        {
+          "test_case_id": 54,
+          "result": {
+            "test_case_id": 54,
+            "execution_id": 98,
+            "oracle_hit": false,
+            "duration_ms": 1930
+          }
+        },
+        {
+          "test_case_id": 55,
+          "result": {
+            "test_case_id": 55,
+            "execution_id": 99,
+            "oracle_hit": false,
+            "duration_ms": 1917
+          }
+        }
+      ]
+    },
+    {
+      "slug": "safe_html",
+      "detected": false,
+      "attempts": 1,
+      "last_test_case_id": 56,
+      "attempt_results": [
+        {
+          "test_case_id": 56,
+          "result": {
+            "test_case_id": 56,
+            "execution_id": 100,
+            "oracle_hit": false,
+            "duration_ms": 4435
+          }
+        }
+      ]
+    },
+    {
+      "slug": "safe_js",
+      "detected": false,
+      "attempts": 1,
+      "last_test_case_id": 57,
+      "attempt_results": [
+        {
+          "test_case_id": 57,
+          "result": {
+            "test_case_id": 57,
+            "execution_id": 101,
+            "oracle_hit": false,
+            "duration_ms": 4452
+          }
+        }
+      ]
+    },
+    {
+      "slug": "prototype_pollution",
+      "detected": true,
+      "attempts": 8,
+      "last_test_case_id": 62,
+      "attempt_results": [
+        {
+          "test_case_id": 59,
+          "result": {
+            "test_case_id": 59,
+            "execution_id": 107,
+            "oracle_hit": true,
+            "duration_ms": 1772
+          }
+        },
+        {
+          "test_case_id": 58,
+          "result": {
+            "test_case_id": 58,
+            "execution_id": 108,
+            "oracle_hit": true,
+            "duration_ms": 1670
+          }
+        },
+        {
+          "test_case_id": 61,
+          "result": {
+            "test_case_id": 61,
+            "execution_id": 109,
+            "oracle_hit": false,
+            "duration_ms": 4585
+          }
+        },
+        {
+          "test_case_id": 60,
+          "result": {
+            "test_case_id": 60,
+            "execution_id": 110,
+            "oracle_hit": false,
+            "duration_ms": 4630
+          }
+        },
+        {
+          "test_case_id": 65,
+          "result": {
+            "test_case_id": 65,
+            "execution_id": 115,
+            "oracle_hit": false,
+            "duration_ms": 4471
+          }
+        },
+        {
+          "test_case_id": 63,
+          "result": {
+            "test_case_id": 63,
+            "execution_id": 116,
+            "oracle_hit": false,
+            "duration_ms": 4540
+          }
+        },
+        {
+          "test_case_id": 64,
+          "result": {
+            "test_case_id": 64,
+            "execution_id": 117,
+            "oracle_hit": false,
+            "duration_ms": 4543
+          }
+        },
+        {
+          "test_case_id": 62,
+          "result": {
+            "test_case_id": 62,
+            "execution_id": 118,
+            "oracle_hit": false,
+            "duration_ms": 4453
+          }
+        }
+      ]
+    },
+    {
+      "slug": "stored_post",
+      "detected": true,
+      "attempts": 3,
+      "last_test_case_id": 67,
+      "attempt_results": [
+        {
+          "test_case_id": 68,
+          "result": {
+            "test_case_id": 68,
+            "execution_id": 121,
+            "oracle_hit": true,
+            "duration_ms": 2016
+          }
+        },
+        {
+          "test_case_id": 66,
+          "result": {
+            "test_case_id": 66,
+            "execution_id": 123,
+            "oracle_hit": true,
+            "duration_ms": 2020
+          }
+        },
+        {
+          "test_case_id": 67,
+          "result": {
+            "test_case_id": 67,
+            "execution_id": 124,
+            "oracle_hit": true,
+            "duration_ms": 2048
+          }
+        }
+      ]
+    },
+    {
+      "slug": "stored_view",
+      "detected": false,
+      "attempts": 1,
+      "last_test_case_id": 69,
+      "attempt_results": [
+        {
+          "test_case_id": 69,
+          "result": {
+            "test_case_id": 69,
+            "execution_id": 125,
+            "oracle_hit": false,
+            "duration_ms": 1471
+          }
+        }
+      ]
+    },
+    {
+      "slug": "wizard",
+      "detected": true,
+      "attempts": 2,
+      "last_test_case_id": 70,
+      "attempt_results": [
+        {
+          "test_case_id": 71,
+          "result": {
+            "test_case_id": 71,
+            "execution_id": 128,
+            "oracle_hit": true,
+            "duration_ms": 2678
+          }
+        },
+        {
+          "test_case_id": 70,
+          "result": {
+            "test_case_id": 70,
+            "execution_id": 129,
+            "oracle_hit": true,
+            "duration_ms": 2595
+          }
+        }
+      ]
+    },
+    {
+      "slug": "ultimate_boss",
+      "detected": true,
+      "attempts": 8,
+      "last_test_case_id": 79,
+      "attempt_results": [
+        {
+          "test_case_id": 73,
+          "result": {
+            "test_case_id": 73,
+            "execution_id": 131,
+            "oracle_hit": false,
+            "duration_ms": 4719
+          }
+        },
+        {
+          "test_case_id": 75,
+          "result": {
+            "test_case_id": 75,
+            "execution_id": 132,
+            "oracle_hit": false,
+            "duration_ms": 4442
+          }
+        },
+        {
+          "test_case_id": 74,
+          "result": {
+            "test_case_id": 74,
+            "execution_id": 133,
+            "oracle_hit": false,
+            "duration_ms": 4517
+          }
+        },
+        {
+          "test_case_id": 72,
+          "result": {
+            "test_case_id": 72,
+            "execution_id": 134,
+            "oracle_hit": true,
+            "duration_ms": 4554
+          }
+        },
+        {
+          "test_case_id": 76,
+          "result": {
+            "test_case_id": 76,
+            "execution_id": 135,
+            "oracle_hit": false,
+            "duration_ms": 4405
+          }
+        },
+        {
+          "test_case_id": 78,
+          "result": {
+            "test_case_id": 78,
+            "execution_id": 136,
+            "oracle_hit": false,
+            "duration_ms": 4427
+          }
+        },
+        {
+          "test_case_id": 77,
+          "result": {
+            "test_case_id": 77,
+            "execution_id": 137,
+            "oracle_hit": false,
+            "duration_ms": 4444
+          }
+        },
+        {
+          "test_case_id": 79,
+          "result": {
+            "test_case_id": 79,
+            "execution_id": 138,
+            "oracle_hit": false,
+            "duration_ms": 4404
+          }
+        }
+      ]
+    }
+  ],
+  "metrics": {
+    "true_positive": 15,
+    "false_positive": 0,
+    "true_negative": 3,
+    "false_negative": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "complete": true,
+    "missing_cases": []
+  }
+}

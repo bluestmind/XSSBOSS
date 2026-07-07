@@ -1,0 +1,33 @@
+# HELP xssboss_http_requests_total HTTP requests by route group and status.
+# TYPE xssboss_http_requests_total counter
+xssboss_http_requests_total{route="targets",status="200"} 1
+# HELP xssboss_http_request_duration_seconds_total Total request processing time.
+# TYPE xssboss_http_request_duration_seconds_total counter
+xssboss_http_request_duration_seconds_total 0.064788
+# HELP xssboss_http_request_duration_seconds Request latency by low-cardinality route group.
+# TYPE xssboss_http_request_duration_seconds histogram
+xssboss_http_request_duration_seconds_bucket{route="targets",le="0.05"} 0
+xssboss_http_request_duration_seconds_bucket{route="targets",le="0.1"} 1
+xssboss_http_request_duration_seconds_bucket{route="targets",le="0.3"} 1
+xssboss_http_request_duration_seconds_bucket{route="targets",le="1"} 1
+xssboss_http_request_duration_seconds_bucket{route="targets",le="5"} 1
+xssboss_http_request_duration_seconds_bucket{route="targets",le="+Inf"} 1
+xssboss_http_request_duration_seconds_sum{route="targets"} 0.064788
+xssboss_http_request_duration_seconds_count{route="targets"} 1
+# HELP xssboss_queue_depth Ready messages by durable queue.
+# TYPE xssboss_queue_depth gauge
+xssboss_queue_depth{queue="orchestration"} 0
+xssboss_queue_depth{queue="browser"} 0
+xssboss_queue_depth{queue="audit"} 0
+xssboss_queue_depth{queue="maintenance"} 0
+xssboss_dependency_up{dependency="redis"} 1
+# HELP xssboss_runs Runs by terminal/current status.
+# TYPE xssboss_runs gauge
+xssboss_runs{status="completed"} 100
+# HELP xssboss_execution_leases Browser execution leases by state.
+# TYPE xssboss_execution_leases gauge
+xssboss_execution_leases{state="active"} 0
+xssboss_execution_leases{state="stale"} 0
+xssboss_stage_leases{state="stale"} 0
+xssboss_dependency_up{dependency="database"} 1
+

