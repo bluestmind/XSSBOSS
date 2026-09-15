@@ -1,7 +1,33 @@
 /** Single URL-to-monitor XSS flow */
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  Crosshair,
+  ShieldCheck,
+  Play,
+  Pause,
+  RotateCcw,
+  Trash2,
+  Search,
+  ExternalLink,
+  Bug,
+  Layers,
+  Zap,
+  Plus,
+  X,
+  ChevronDown,
+  ChevronRight,
+  Trophy,
+  CheckCircle2,
+  Activity,
+  AlertTriangle,
+  Clock3,
+  LoaderCircle,
+  Wrench,
+} from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { experimentsApi } from '@/api/experiments';
+import { programsApi } from '@/api/programs';
 import { scansApi } from '@/api/scans';
 import { useExperimentStore } from '@/store/experimentState';
 import type { ExperimentMonitor, ScanCreate } from '@/types/api';
@@ -9,23 +35,15 @@ import { KpiCard } from '@/components/ui/kpi-card';
 import EngineLog from '@/components/ui/engine-log';
 // @ts-expect-error -- legacy JSX component does not ship TypeScript declarations.
 import EndpointsMap from '@/components/EndpointsMap';
-
-type StepState = 'pending' | 'active' | 'done' | 'warning';
-
-interface RunbookStep {
-  id: string;
-  phase: string;
-  title: string;
-  detail: string;
-  state: StepState;
-  count?: number;
-}
+import { LiveBrowserPreview } from '@/components/LiveBrowserPreview';
+import RiverFlowMonitor from '@/components/RiverFlowMonitor';
 
 const statusClass: Record<string, string> = {
   pending: 'bg-carbon-700/50 text-carbon-300 border-carbon-600/60',
   active: 'bg-brand-500/15 text-brand-200 border-brand-500/30',
   done: 'bg-emerald-500/15 text-emerald-200 border-emerald-500/30',
   warning: 'bg-amber-500/15 text-amber-200 border-amber-500/30',
+  inconclusive: 'bg-amber-500/15 text-amber-200 border-amber-500/30',
   queued: 'bg-brand-500/15 text-brand-200 border-brand-500/30',
   running: 'bg-amber-500/15 text-amber-200 border-amber-500/30',
   completed: 'bg-emerald-500/15 text-emerald-200 border-emerald-500/30',
@@ -47,12 +65,36 @@ const initialFormData: ScanCreate = {
   url: '',
   authorized: false,
   crawl: true,
-  max_depth: 1,
-  max_pages: 15,
+  max_depth: 2,
+  max_pages: 100,
   strategy: 'smart_adaptive',
   autonomous_research: true,
   mode: 'full',
 };
+
+const initialAuthForm = {
+  identity: 'user',
+  cookie: '',
+  authorization: '',
+  healthCheckUrl: '/account',
+  loginUrl: '',
+  username: '',
+  password: '',
+  usernameSelector: '',
+  passwordSelector: '',
+  submitSelector: '',
+  successSelector: '',
+};
+
+const parseCookieHeader = (value: string) => Object.fromEntries(
+  value.split(';')
+    .map((part) => part.trim())
+    .filter((part) => part.includes('='))
+    .map((part) => {
+      const separator = part.indexOf('=');
+      return [part.slice(0, separator).trim(), part.slice(separator + 1).trim()];
+    })
+);
 
 const Badge = ({ value }: { value: string }) => (
   <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${statusClass[value] || 'bg-carbon-700/50 text-carbon-300 border-carbon-600/60'}`}>
@@ -69,6 +111,16 @@ const formatTime = (value: string) => {
   } catch {
     return value;
   }
+};
+
+const formatDuration = (value?: number) => {
+  const seconds = Math.max(0, Math.floor(value || 0));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainder = seconds % 60;
+  if (hours) return `${hours}h ${minutes}m ${remainder}s`;
+  if (minutes) return `${minutes}m ${remainder}s`;
+  return `${remainder}s`;
 };
 
 const getTestableUrl = (url?: string) => {
@@ -149,6 +201,7 @@ const formatStage = (value?: string) => {
     queued: 'Queued',
     executing: 'Executing',
     completed: 'Completed',
+    inconclusive: 'Inconclusive',
     no_checks: 'No checks',
     burp_blocked: 'Burp blocked',
     target_unreachable: 'Target unreachable',
@@ -181,109 +234,21 @@ const summarizeExecutionLog = (value?: string) => {
     const errors = parsed.errors || parsed.page_errors || [];
     const consoleMessages = parsed.console || parsed.console_messages || [];
     const callbacks = parsed.callbacks || parsed.oracle_callbacks || [];
-    if (errors.length) return `Error: ${String(errors[0])}`;
     if (callbacks.length) return `Oracle callback observed: ${String(callbacks[0])}`;
-    if (consoleMessages.length) return `Console: ${String(consoleMessages[0])}`;
-    return 'Browser completed without console errors or oracle callback.';
+    if (errors.length) {
+      const firstErr = String(errors[0]);
+      if (firstErr.includes('Failed to load resource') || firstErr.includes('net::ERR_')) {
+        return `Target page console: Subresource/tracker blocked or failed to load (${firstErr.split(' - ')[1] || firstErr})`;
+      }
+      return `Target page console: ${firstErr}`;
+    }
+    if (consoleMessages.length) return `Target page console: ${String(consoleMessages[0])}`;
+    return 'Browser rendered successfully without oracle callback.';
   } catch {
     return value;
   }
 };
 
-const buildRunbook = (monitor?: ExperimentMonitor, hasStarted = false): RunbookStep[] => {
-  const stats = monitor?.stats;
-  const total = stats?.total_test_cases || 0;
-  const executed = monitor?.recent_executions.length || 0;
-  const contexts = new Set(monitor?.recent_checks.map((check) => check.context_type).filter(Boolean));
-  const findings = monitor?.recent_findings.length || 0;
-  const active = (stats?.queued || 0) + (stats?.running || 0);
-  const finished = (stats?.completed || 0) + (stats?.failed || 0);
-  const isComplete = monitor?.experiment.status === 'completed';
-  const isReconOnly = monitor?.experiment.limits?.scan_mode === 'recon' || monitor?.experiment.limits?.vuln_checks_enabled === false;
-  const reconEndpointCount = Number(monitor?.experiment.limits?.recon_endpoint_count || 0);
-  const reconParamCount = Number(monitor?.experiment.limits?.recon_param_count || 0);
-  const noChecks = isComplete && total === 0 && !isReconOnly;
-  const reconComplete = isComplete && isReconOnly;
-
-  return [
-    {
-      id: 'scope',
-      phase: 'Phase 1',
-      title: 'Scope and authorization',
-      detail: 'Create a target from the submitted URL and keep testing constrained to that host.',
-      state: hasStarted ? 'done' : 'pending',
-      count: hasStarted ? 1 : 0,
-    },
-    {
-      id: 'recon',
-      phase: 'Phase 1',
-      title: 'Crawler and parameter inventory',
-      detail: 'Crawl same-host links/forms, import the submitted URL, and map controllable inputs.',
-      state: !hasStarted ? 'pending' : noChecks ? 'warning' : reconComplete || total > 0 || monitor?.stage !== 'recon' ? 'done' : 'active',
-      count: reconEndpointCount || total,
-    },
-    {
-      id: 'contexts',
-      phase: 'Phase 2',
-      title: isReconOnly ? 'Parameter enrichment' : 'Context-aware reflection mapping',
-      detail: isReconOnly
-        ? 'Mine scripts, forms, archive URLs, and imported traffic for controllable parameter names.'
-        : 'Classify where each value lands: HTML text, attributes, JavaScript, URL, or JSON.',
-      state: isReconOnly ? (reconComplete ? 'done' : hasStarted ? 'active' : 'pending') : contexts.size > 0 ? 'done' : total > 0 ? 'active' : 'pending',
-      count: isReconOnly ? reconParamCount : contexts.size,
-    },
-    {
-      id: 'filters',
-      phase: 'Phase 3',
-      title: 'Filter and WAF behavior profiling',
-      detail: 'Probe escaping, stripped keywords, blocked tags, and normalization behavior.',
-      state: isReconOnly ? (reconComplete ? 'done' : 'pending') : noChecks ? 'warning' : total > 0 ? 'done' : hasStarted ? 'active' : 'pending',
-      count: total,
-    },
-    {
-      id: 'payloads',
-      phase: 'Phase 5',
-      title: 'Payload generation and mutation',
-      detail: 'Generate max-coverage payloads using context, filter profile, priority, and mutation strategy.',
-      state: isReconOnly ? 'pending' : noChecks ? 'warning' : total > 0 ? 'done' : hasStarted ? 'active' : 'pending',
-      count: total,
-    },
-    {
-      id: 'queue',
-      phase: 'Phase 7',
-      title: 'Queue and protocol execution',
-      detail: 'Queue checks by priority and preserve method, endpoint, parameter, and payload evidence.',
-      state: active > 0 ? 'active' : finished > 0 ? 'done' : total > 0 ? 'warning' : 'pending',
-      count: active,
-    },
-    {
-      id: 'oracle',
-      phase: 'Phase 8',
-      title: 'Browser oracle telemetry',
-      detail: 'Run payloads in the browser and record oracle status, console errors, screenshots, and DOM evidence.',
-      state: executed > 0 ? (active > 0 ? 'active' : 'done') : total > 0 ? 'active' : 'pending',
-      count: executed,
-    },
-    {
-      id: 'findings',
-      phase: 'Phase 8',
-      title: 'Finding correlation',
-      detail: 'Correlate oracle hits back to endpoint, parameter, payload, and proof artifacts.',
-      state: isReconOnly ? 'pending' : findings > 0 ? 'done' : isComplete && !noChecks ? 'warning' : executed > 0 ? 'active' : 'pending',
-      count: findings,
-    },
-    {
-      id: 'complete',
-      phase: 'Phase 10',
-      title: isReconOnly ? 'Recon handoff' : 'False-negative review and completion',
-      detail: isReconOnly
-        ? 'Freeze the discovered attack surface so a full vuln scan can use it without repeating basic setup.'
-        : 'Finish the run, review missed/error cases, and keep weak spots visible in the log stream.',
-      state: noChecks ? 'warning' : isComplete ? 'done' : hasStarted ? 'active' : 'pending',
-      count: finished,
-    },
-  ];
-};
 
 const getEngineDecision = (monitor?: ExperimentMonitor) => {
   if (!monitor) return 'Waiting for a run. Submit a URL or select a previous run.';
@@ -299,6 +264,7 @@ const getEngineDecision = (monitor?: ExperimentMonitor) => {
   if (monitor.stage === 'no_checks' || (monitor.experiment.status === 'completed' && stats.total_test_cases === 0 && !isReconOnly)) {
     return 'Run ended fast because no controllable/reflected parameters became payload checks. Use a parameterized URL, crawlable form, or Burp-imported traffic.';
   }
+  if (monitor.stage === 'inconclusive') return monitor.stage_detail;
   if (monitor.experiment.status === 'paused') return 'Paused by operator. Engine will not queue new payloads until resumed.';
   if (stats.running > 0) return `Testing ${stats.running} payload(s) now because they were highest priority for their context and parameter.`;
   if (stats.queued > 0) return `Waiting for browser workers. ${stats.queued} payload(s) are queued by priority.`;
@@ -327,6 +293,29 @@ const ScanPage = () => {
   const [logFilter, setLogFilter] = useState<'all' | 'errors' | 'hits'>('all');
   const [activeTabs, setActiveTabs] = useState<Record<number, 'verify' | 'evidence'>>({});
   const [pendingMode, setPendingMode] = useState<'recon' | 'full' | null>(null);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [authForm, setAuthForm] = useState(initialAuthForm);
+  const [authError, setAuthError] = useState('');
+  const [resolutionAuthJson, setResolutionAuthJson] = useState('');
+  const [historyFilter, setHistoryFilter] = useState<'all' | 'running' | 'paused' | 'hits' | 'completed'>('all');
+  const [historySearch, setHistorySearch] = useState('');
+  const [showUrlLauncher, setShowUrlLauncher] = useState(false);
+  const [expandedPrograms, setExpandedPrograms] = useState<Record<string, boolean>>({});
+  const [expandedExecutions, setExpandedExecutions] = useState<Record<number, boolean>>({});
+  const [clockNow, setClockNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const toggleProgram = (key: string) => {
+    setExpandedPrograms((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const toggleExecution = (id: number) => {
+    setExpandedExecutions((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
 
   const { data: health, isError: healthError } = useQuery({
     queryKey: ['scan-health'],
@@ -340,6 +329,18 @@ const ScanPage = () => {
     queryFn: () => experimentsApi.list(),
     refetchInterval: 5000,
   });
+
+  // Auto-select latest active/running run on initial load
+  useEffect(() => {
+    if (!startedExperimentId && previousRuns.length > 0) {
+      const activeRun = previousRuns.find((r) => r.status === 'running' || r.status === 'paused');
+      const targetRun = activeRun || previousRuns[0];
+      if (targetRun) {
+        setStartedExperimentId(targetRun.id);
+        setActiveExperiment(targetRun.id);
+      }
+    }
+  }, [previousRuns, startedExperimentId, setActiveExperiment]);
 
   const { data: monitor, isError: monitorError } = useQuery({
     queryKey: ['experiments', startedExperimentId, 'monitor'],
@@ -389,8 +390,87 @@ const ScanPage = () => {
     },
   });
 
+  const bulkDeleteCompletedMutation = useMutation({
+    mutationFn: async () => {
+      const toDelete = previousRuns.filter((r) => r.status === 'completed' || r.status === 'failed');
+      for (const run of toDelete) {
+        try {
+          await experimentsApi.delete(run.id);
+        } catch {
+          // Continue deleting the remaining completed runs.
+        }
+      }
+      return toDelete.map((r) => r.id);
+    },
+    onSuccess: (deletedIds) => {
+      if (startedExperimentId && deletedIds.includes(startedExperimentId)) {
+        setStartedExperimentId(null);
+      }
+      queryClient.invalidateQueries({ queryKey: ['experiments'] });
+    },
+  });
+
+  const huntProgramMutation = useMutation({
+    mutationFn: (targetId: number) => programsApi.startHunt(targetId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['experiments'] });
+      queryClient.invalidateQueries({ queryKey: ['programs'] });
+    },
+  });
+
+  const resolveInterventionMutation = useMutation({
+    mutationFn: ({ experimentId, interventionId }: { experimentId: number; interventionId: string }) => {
+      let authInfo: Record<string, any> | undefined;
+      if (resolutionAuthJson.trim()) authInfo = JSON.parse(resolutionAuthJson);
+      return scansApi.resolveIntervention(experimentId, interventionId, {
+        resolution: 'Updated authorized session supplied by operator',
+        auth_info: authInfo,
+      });
+    },
+    onSuccess: () => {
+      setResolutionAuthJson('');
+      setAuthError('');
+      queryClient.invalidateQueries({ queryKey: ['experiments'] });
+      queryClient.invalidateQueries({ queryKey: ['experiments', startedExperimentId, 'monitor'] });
+    },
+    onError: (error) => setAuthError(getErrorDetail(error)),
+  });
+
+  const buildAuthInfo = () => {
+    if (!authOpen) return undefined;
+    const identity = authForm.identity.trim() || 'user';
+    const loginConfigured = Boolean(authForm.loginUrl.trim() || authForm.username || authForm.password);
+    return {
+      default_identity: identity,
+      identities: {
+        [identity]: {
+          headers: authForm.authorization.trim() ? { Authorization: authForm.authorization.trim() } : {},
+          cookies: parseCookieHeader(authForm.cookie),
+          health_check_url: authForm.healthCheckUrl.trim() || undefined,
+          login: loginConfigured ? {
+            url: authForm.loginUrl.trim(),
+            username: authForm.username,
+            password: authForm.password,
+            username_selector: authForm.usernameSelector.trim() || undefined,
+            password_selector: authForm.passwordSelector.trim() || undefined,
+            submit_selector: authForm.submitSelector.trim() || undefined,
+            success_selector: authForm.successSelector.trim() || undefined,
+          } : {},
+        },
+      },
+    };
+  };
+
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
+    let authInfo: Record<string, any> | undefined;
+    try {
+      authInfo = buildAuthInfo();
+      setAuthError('');
+    } catch {
+      setAuthError('Advanced authentication JSON is invalid. Fix it before starting the campaign.');
+      return;
+    }
     const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
     const mode = submitter?.value === 'recon' ? 'recon' : 'full';
     setPendingMode(mode);
@@ -398,10 +478,12 @@ const ScanPage = () => {
       ...formData,
       mode,
       crawl: true,
-      max_depth: 1,
-      max_pages: 15,
       strategy: 'smart_adaptive',
       autonomous_research: true,
+      auth_info: authInfo,
+      auth_identity: authInfo
+        ? String(authInfo.default_identity || authForm.identity.trim() || 'user')
+        : undefined,
     });
   };
 
@@ -432,7 +514,113 @@ const ScanPage = () => {
     () => [...previousRuns].sort((a, b) => b.id - a.id),
     [previousRuns]
   );
-  const runbook = useMemo(() => buildRunbook(monitor, !!startedExperimentId), [monitor, startedExperimentId]);
+
+  interface ProgramHuntGroup {
+    programKey: string;
+    targetId?: number;
+    programName: string;
+    programHandle: string;
+    runs: typeof previousRuns;
+    activeCount: number;
+    pausedCount: number;
+    completedCount: number;
+    failedCount: number;
+    findingsCount: number;
+    latestStartedAt?: string;
+  }
+
+  const getProgramInfo = useCallback((run: (typeof previousRuns)[0]) => {
+    if (run.target_name) {
+      return {
+        name: run.target_name,
+        handle: run.target_handle || run.target_name.toLowerCase().replace(/\s+/g, '_'),
+      };
+    }
+    if (run.name && run.name.startsWith('Hunt: ')) {
+      const parts = run.name.slice(6).split(' - ');
+      const name = parts[0].trim();
+      return {
+        name,
+        handle: name.toLowerCase().replace(/\s+/g, '_'),
+      };
+    }
+    if (run.name && (run.name.includes('://') || run.name.startsWith('Scan: '))) {
+      try {
+        const urlStr = run.name.replace('Scan: ', '').trim();
+        const host = new URL(urlStr).hostname;
+        return { name: host, handle: host };
+      } catch {
+        // Fall through to the stable run-name fallback.
+      }
+    }
+    return { name: run.name || `Target #${run.target_id}`, handle: `target_${run.target_id}` };
+  }, []);
+
+  const allProgramGroups = useMemo(() => {
+    const map = new Map<string, ProgramHuntGroup>();
+
+    for (const run of sortedPreviousRuns) {
+      const { name, handle } = getProgramInfo(run);
+      const key = `${run.target_id || ''}_${name}`;
+
+      if (!map.has(key)) {
+        map.set(key, {
+          programKey: key,
+          targetId: run.target_id,
+          programName: name,
+          programHandle: handle,
+          runs: [],
+          activeCount: 0,
+          pausedCount: 0,
+          completedCount: 0,
+          failedCount: 0,
+          findingsCount: 0,
+          latestStartedAt: run.started_at,
+        });
+      }
+
+      const grp = map.get(key)!;
+      grp.runs.push(run);
+      if (run.status === 'running' || run.status === 'pending') grp.activeCount += 1;
+      else if (run.status === 'paused') grp.pausedCount += 1;
+      else if (run.status === 'completed') grp.completedCount += 1;
+      else if (run.status === 'failed') grp.failedCount += 1;
+
+      const findings = Number((run.limits as Record<string, unknown> | undefined)?.findings_count || 0);
+      grp.findingsCount += findings;
+    }
+
+    return Array.from(map.values());
+  }, [sortedPreviousRuns, getProgramInfo]);
+
+  const groupCounts = useMemo(() => ({
+    all: allProgramGroups.length,
+    running: allProgramGroups.filter((g) => g.activeCount > 0).length,
+    paused: allProgramGroups.filter((g) => g.pausedCount > 0).length,
+    hits: allProgramGroups.filter((g) => g.findingsCount > 0).length,
+    completed: allProgramGroups.filter((g) => g.completedCount > 0 && g.activeCount === 0).length,
+  }), [allProgramGroups]);
+
+  const filteredProgramGroups = useMemo(() => {
+    return allProgramGroups.filter((grp) => {
+      if (historyFilter === 'running' && grp.activeCount === 0) return false;
+      if (historyFilter === 'paused' && grp.pausedCount === 0) return false;
+      if (historyFilter === 'hits' && grp.findingsCount === 0) return false;
+      if (historyFilter === 'completed' && (grp.completedCount === 0 || grp.activeCount > 0)) return false;
+
+      if (historySearch.trim()) {
+        const q = historySearch.toLowerCase().trim();
+        const pName = grp.programName.toLowerCase();
+        const pHandle = grp.programHandle.toLowerCase();
+        const hasMatchingRun = grp.runs.some((r) => (r.name || '').toLowerCase().includes(q) || String(r.id).includes(q));
+        if (!pName.includes(q) && !pHandle.includes(q) && !hasMatchingRun) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [allProgramGroups, historyFilter, historySearch]);
+
   const visibleLogs = useMemo(() => {
     const events = monitor?.activity_log || [];
     if (logFilter === 'errors') return events.filter((event) => event.level === 'error' || event.message.toLowerCase().includes('failed'));
@@ -449,133 +637,244 @@ const ScanPage = () => {
   );
 
   const errorDetail = getErrorDetail(mutation.error);
-
-  const runbookAccent: Record<StepState, string> = {
-    pending: 'border-carbon-700/70',
-    active: 'border-brand-500/40 shadow-glow-brand',
-    done: 'border-emerald-500/25',
-    warning: 'border-amber-500/30',
-  };
-  const runbookDot: Record<StepState, string> = {
-    pending: 'bg-carbon-500',
-    active: 'bg-brand-400 animate-pulse-soft',
-    done: 'bg-emerald-400',
-    warning: 'bg-amber-400',
-  };
+  const openInterventions = ((monitor?.experiment.limits?.human_interventions || []) as Array<{
+    id: string;
+    status: string;
+    kind: string;
+    reason: string;
+    identity?: string;
+    url?: string;
+    workflow?: string;
+  }>).filter((item) => item.status === 'open');
 
   const ring = 2 * Math.PI * 26;
   const progressPct = monitor?.progress_percent ?? 0;
+  const liveProgress = monitor?.live_progress;
+  const heartbeatAt = liveProgress?.updated_at ? Date.parse(liveProgress.updated_at) : Number.NaN;
+  const heartbeatAge = Number.isFinite(heartbeatAt)
+    ? Math.max(0, Math.floor((clockNow - heartbeatAt) / 1000))
+    : Math.floor(monitor?.idle_seconds || 0);
+  const heartbeatStale = Boolean(
+    monitor?.experiment.status === 'running' && (monitor.progress_stale || heartbeatAge > 30)
+  );
+  const progressState = liveProgress?.state || monitor?.experiment.status || 'waiting';
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
-      {/* Hero */}
-      <div className="animate-rise">
-        <p className="eyebrow flex items-center gap-2">
-          <span className="h-px w-6 bg-gradient-to-r from-brand-500 to-transparent" />
-          Attack Console
-        </p>
-        <h1 className="mt-2 font-display text-3xl font-bold tracking-tight text-carbon-100 sm:text-4xl">
-          Lock a target. <span className="bg-gradient-to-r from-brand-300 to-fuchsia-400 bg-clip-text text-transparent">Watch it break.</span>
-        </h1>
-        <p className="mt-3 max-w-2xl text-sm leading-6 text-carbon-300">
-          Feed one authorized URL. Run recon to map the surface, or fire the full flow to move straight into
-          typed vulnerability checks with live browser-oracle telemetry.
-        </p>
-      </div>
-
-      {/* Target-lock command console */}
-      <section className="panel scanline animate-rise overflow-hidden">
-        <div className="flex items-center justify-between border-b border-carbon-700/60 bg-carbon-850/40 px-5 py-3">
-          <div className="flex items-center gap-2.5 font-mono text-[11px] text-carbon-400">
-            <span className="flex gap-1.5">
-              <span className="h-3 w-3 rounded-full bg-rose-500/70" />
-              <span className="h-3 w-3 rounded-full bg-amber-400/70" />
-              <span className="h-3 w-3 rounded-full bg-emerald-400/70" />
-            </span>
-            <span className="ml-1 hidden sm:inline">target-lock — recon / vuln</span>
+      {/* Clean Modern Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-2.5">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-500/20 text-brand-300">
+            <Crosshair className="h-5 w-5" />
+          </span>
+          <div>
+            <h1 className="text-2xl font-bold font-display tracking-tight text-carbon-100">
+              Recon & Vuln Scan Monitor
+            </h1>
+            <p className="text-xs text-carbon-400">
+              Autonomous reflection mapping, live browser telemetry, and attack graph execution
+            </p>
           </div>
-          <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold ${
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => setShowUrlLauncher((v) => !v)}
+            className="btn btn-ghost px-3 py-1.5 text-xs text-brand-300 hover:bg-brand-500/10 border border-brand-500/30"
+          >
+            <Plus className="mr-1 h-3.5 w-3.5" />
+            {showUrlLauncher ? 'Close URL Launcher' : 'Custom URL Scan'}
+          </button>
+          <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
             healthError ? 'border-rose-500/30 bg-rose-500/10 text-rose-200'
               : health ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
               : 'border-carbon-600 bg-carbon-800/50 text-carbon-300'
           }`}>
             <span className={`h-1.5 w-1.5 rounded-full ${healthError ? 'bg-rose-400' : health ? 'bg-emerald-400 animate-pulse-soft' : 'bg-carbon-400'}`} />
-            {healthError ? 'Backend offline' : health ? 'Backend online' : 'Checking backend…'}
+            {healthError ? 'Backend offline' : health ? 'Engine Online' : 'Checking…'}
           </span>
         </div>
+      </div>
 
-        <form onSubmit={handleSubmit} className="space-y-5 p-5 sm:p-6">
-          <div>
-            <label className="eyebrow">Target URL</label>
-            <div className="mt-2 flex items-center gap-2.5 rounded-xl border border-carbon-600 bg-carbon-950/70 px-3.5 transition focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-500/25">
-              <span className="select-none font-mono text-lg text-brand-400">⌖</span>
-              <input
-                type="url"
-                required
-                value={formData.url}
-                onChange={(event) => setFormData({ ...formData, url: event.target.value })}
-                className="flex-1 bg-transparent py-3 font-mono text-sm text-carbon-100 placeholder-carbon-500 focus:outline-none"
-                placeholder="https://example.com/search?q=test"
-              />
-              <span className="hidden select-none rounded border border-carbon-700 px-1.5 py-0.5 font-mono text-[10px] text-carbon-500 sm:block">GET</span>
+      {/* Collapsible Custom URL Launcher */}
+      {showUrlLauncher && (
+        <section className="panel scanline animate-rise overflow-hidden">
+          <div className="flex items-center justify-between border-b border-carbon-700/60 bg-carbon-850/40 px-5 py-3">
+            <div className="flex items-center gap-2.5 font-mono text-[11px] text-carbon-400">
+              <span className="flex gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-full bg-rose-500/70" />
+                <span className="h-2.5 w-2.5 rounded-full bg-amber-400/70" />
+                <span className="h-2.5 w-2.5 rounded-full bg-emerald-400/70" />
+              </span>
+              <span className="ml-1">Target URL Direct Scan</span>
             </div>
+            <button
+              type="button"
+              onClick={() => setShowUrlLauncher(false)}
+              className="text-carbon-400 hover:text-carbon-200"
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
 
-          <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-carbon-700/70 bg-carbon-850/40 px-4 py-3 transition hover:border-carbon-600">
-            <input
-              type="checkbox"
-              required
-              checked={formData.authorized}
-              onChange={(event) => setFormData({ ...formData, authorized: event.target.checked })}
-              className="mt-0.5 h-4 w-4 rounded border-carbon-500 bg-carbon-900 text-brand-500 focus:ring-brand-500/40"
-            />
-            <span className="text-sm text-carbon-300">
-              <span className="font-semibold text-carbon-100">Authorization confirmed.</span>{' '}
-              I own this target or have explicit permission to test it.
-            </span>
-          </label>
-
-          {errorDetail && (
-            <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-              {errorDetail}
+          <form onSubmit={handleSubmit} className="space-y-4 p-5">
+            <div>
+              <label className="eyebrow">Target URL</label>
+              <div className="mt-2 flex items-center gap-2.5 rounded-xl border border-carbon-600 bg-carbon-950/70 px-3.5 transition focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-500/25">
+                <Crosshair className="h-5 w-5 shrink-0 text-brand-400" aria-hidden="true" />
+                <input
+                  type="url"
+                  required
+                  value={formData.url}
+                  onChange={(event) => setFormData({ ...formData, url: event.target.value })}
+                  className="flex-1 bg-transparent py-2.5 font-mono text-sm text-carbon-100 placeholder-carbon-500 focus:outline-none"
+                  placeholder="https://example.com/search?q=test"
+                />
+                <span className="hidden select-none rounded border border-carbon-700 px-1.5 py-0.5 font-mono text-[10px] text-carbon-500 sm:block">GET</span>
+              </div>
             </div>
-          )}
 
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="submit"
-              name="mode"
-              value="recon"
-              disabled={mutation.isPending || healthError}
-              className="btn btn-ghost"
-            >
-              {mutation.isPending && pendingMode === 'recon' ? 'Starting recon…' : 'Run recon only'}
-            </button>
-            <button
-              type="submit"
-              name="mode"
-              value="full"
-              disabled={mutation.isPending || healthError}
-              className="btn btn-primary"
-            >
-              {mutation.isPending && pendingMode === 'full' ? 'Deploying…' : '⚡ Run recon + vuln scan'}
-            </button>
-            {startedExperimentId && (
+            <div className="grid gap-3 rounded-xl border border-carbon-700/70 bg-carbon-850/30 p-4 sm:grid-cols-2">
+              <div>
+                <label htmlFor="scan-max-pages" className="mb-1 block text-xs font-semibold text-carbon-200">Representative page budget</label>
+                <input
+                  id="scan-max-pages"
+                  type="number"
+                  min={1}
+                  max={500}
+                  value={formData.max_pages ?? 100}
+                  onChange={(event) => setFormData({ ...formData, max_pages: Math.max(1, Math.min(500, Number(event.target.value) || 1)) })}
+                  className="field font-mono"
+                />
+                <p className="mt-1 text-[11px] leading-relaxed text-carbon-400">Template-equivalent blog, article, product, and ID routes are sampled instead of consuming one slot each.</p>
+              </div>
+              <div>
+                <label htmlFor="scan-max-depth" className="mb-1 block text-xs font-semibold text-carbon-200">Maximum link depth</label>
+                <input
+                  id="scan-max-depth"
+                  type="number"
+                  min={0}
+                  max={5}
+                  value={formData.max_depth ?? 2}
+                  onChange={(event) => setFormData({ ...formData, max_depth: Math.max(0, Math.min(5, Number(event.target.value) || 0)) })}
+                  className="field font-mono"
+                />
+                <p className="mt-1 text-[11px] leading-relaxed text-carbon-400">Query-bearing and security-feature routes are prioritized before ordinary content pages.</p>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-carbon-700/70 bg-carbon-850/30">
               <button
                 type="button"
+                aria-expanded={authOpen}
+                aria-controls="authenticated-campaign-options"
                 onClick={() => {
-                  setStartedExperimentId(null);
-                  setFormData(initialFormData);
-                  mutation.reset();
+                  setAuthOpen((value) => !value);
+                  setAuthError('');
                 }}
-                className="btn btn-ghost ml-auto"
+                className="flex min-h-10 w-full items-center justify-between gap-4 px-4 py-2.5 text-left focus:outline-none"
               >
-                New URL
+                <span>
+                  <span className="block text-xs font-semibold text-carbon-100">Authenticated campaign</span>
+                  <span className="block text-[11px] text-carbon-400">Optional cookies, bearer headers, login renewal, and multiple identities.</span>
+                </span>
+                <span className="font-mono text-xs text-brand-300">{authOpen ? 'Hide' : 'Configure'}</span>
               </button>
+
+              {authOpen && (
+                <div id="authenticated-campaign-options" className="space-y-4 border-t border-carbon-700/60 p-4">
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div>
+                      <label htmlFor="auth-identity" className="mb-1 block text-xs font-semibold text-carbon-200">Identity label</label>
+                      <input
+                        id="auth-identity"
+                        value={authForm.identity}
+                        onChange={(event) => setAuthForm({ ...authForm, identity: event.target.value })}
+                        className="field"
+                        placeholder="author"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="auth-health-url" className="mb-1 block text-xs font-semibold text-carbon-200">Session health URL</label>
+                      <input
+                        id="auth-health-url"
+                        value={authForm.healthCheckUrl}
+                        onChange={(event) => setAuthForm({ ...authForm, healthCheckUrl: event.target.value })}
+                        className="field font-mono"
+                        placeholder="/account"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="auth-cookie" className="mb-1 block text-xs font-semibold text-carbon-200">Cookie header</label>
+                      <input
+                        id="auth-cookie"
+                        value={authForm.cookie}
+                        onChange={(event) => setAuthForm({ ...authForm, cookie: event.target.value })}
+                        className="field font-mono"
+                        placeholder="session=…; csrf=…"
+                        autoComplete="off"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="auth-header" className="mb-1 block text-xs font-semibold text-carbon-200">Authorization header</label>
+                      <input
+                        id="auth-header"
+                        value={authForm.authorization}
+                        onChange={(event) => setAuthForm({ ...authForm, authorization: event.target.value })}
+                        className="field font-mono"
+                        placeholder="Bearer …"
+                        autoComplete="off"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-carbon-700/70 bg-carbon-850/40 px-4 py-2.5 transition hover:border-carbon-600">
+              <input
+                type="checkbox"
+                required
+                checked={formData.authorized}
+                onChange={(event) => setFormData({ ...formData, authorized: event.target.checked })}
+                className="mt-0.5 h-4 w-4 rounded border-carbon-500 bg-carbon-900 text-brand-500 focus:ring-brand-500/40"
+              />
+              <span className="text-xs text-carbon-300">
+                <span className="font-semibold text-carbon-100">Authorization confirmed.</span>{' '}
+                I own this target or have explicit permission to test it.
+              </span>
+            </label>
+
+            {(errorDetail || authError) && (
+              <div role="alert" className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-xs text-rose-200">
+                {authError || errorDetail}
+              </div>
             )}
-          </div>
-        </form>
-      </section>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="submit"
+                name="mode"
+                value="recon"
+                disabled={mutation.isPending || healthError}
+                className="btn btn-ghost px-3 py-1.5 text-xs"
+              >
+                {mutation.isPending && pendingMode === 'recon' ? 'Starting recon…' : 'Run recon only'}
+              </button>
+              <button
+                type="submit"
+                name="mode"
+                value="full"
+                disabled={mutation.isPending || healthError}
+                className="btn btn-primary px-3.5 py-1.5 text-xs shadow-glow-brand"
+              >
+                {mutation.isPending && pendingMode === 'full' ? 'Deploying…' : <><ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />Run recon + vuln scan</>}
+              </button>
+            </div>
+          </form>
+        </section>
+      )}
 
       {mutation.data && !monitor && !monitorError && (
         <div className="rounded-2xl border border-brand-500/30 bg-brand-500/10 p-4">
@@ -590,104 +889,404 @@ const ScanPage = () => {
         </div>
       )}
 
-      {/* Previous runs */}
+      {startedExperimentId && openInterventions.length > 0 && (
+        <section className="panel border-amber-500/30" aria-live="polite">
+          <SectionHeader
+            title="Operator action required"
+            hint="The campaign is paused safely. Supply a refreshed authorized session, then resume the same run."
+            right={<Badge value="paused" />}
+          />
+          <div className="space-y-4 p-5">
+            {openInterventions.map((item) => (
+              <div key={item.id} className="rounded-xl border border-amber-500/25 bg-amber-500/10 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-amber-100">{item.kind.replace(/_/g, ' ')}</p>
+                  {item.identity && <span className="rounded-md border border-amber-500/30 px-2 py-1 font-mono text-[11px] text-amber-200">identity: {item.identity}</span>}
+                </div>
+                <p className="mt-2 text-sm leading-6 text-carbon-200">{item.reason}</p>
+                {item.url && <p className="mt-2 break-all font-mono text-xs text-carbon-400">{item.url}</p>}
+                <label htmlFor={`resolution-auth-${item.id}`} className="mt-4 block text-xs font-semibold text-carbon-200">Refreshed auth JSON (optional)</label>
+                <textarea
+                  id={`resolution-auth-${item.id}`}
+                  value={resolutionAuthJson}
+                  onChange={(event) => setResolutionAuthJson(event.target.value)}
+                  className="mt-2 min-h-28 w-full rounded-lg border border-carbon-600 bg-carbon-950/70 p-3 font-mono text-sm leading-6 text-carbon-100 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/25"
+                  placeholder="Paste updated cookies/storage or a full multi-identity configuration"
+                  spellCheck={false}
+                />
+                <button
+                  type="button"
+                  disabled={resolveInterventionMutation.isPending}
+                  onClick={() => resolveInterventionMutation.mutate({ experimentId: startedExperimentId, interventionId: item.id })}
+                  className="btn btn-primary mt-3 min-h-11"
+                >
+                  {resolveInterventionMutation.isPending ? 'Validating session…' : 'Resolve and resume campaign'}
+                </button>
+              </div>
+            ))}
+            {resolveInterventionMutation.error && (
+              <p className="text-sm text-rose-200">{getErrorDetail(resolveInterventionMutation.error)}</p>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* Program Hunt Fleet & History Console */}
       <section className="panel">
-        <SectionHeader
-          title="Previous runs"
-          hint="Click any run to load its monitor on this same page."
-          right={startedExperimentId ? (
-            <div className="rounded-lg border border-carbon-700/70 bg-carbon-800/50 px-3 py-1.5 font-mono text-[11px] text-carbon-300">
-              viewing #{startedExperimentId}
+        <div className="panel-header flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-carbon-700/60 p-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <Layers className="h-4 w-4 text-brand-400" />
+              <h2 className="font-display text-base font-bold tracking-tight text-carbon-100">
+                Program Hunt Fleet & History
+              </h2>
             </div>
-          ) : undefined}
-        />
-        <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
-          {sortedPreviousRuns.slice(0, 12).map((run) => (
+            <p className="mt-0.5 text-xs text-carbon-400">
+              Select any program to monitor live telemetry, resume fuzzing, or review confirmed vulnerabilities.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {previousRuns.filter((r) => r.status === 'completed' || r.status === 'failed').length > 0 && (
+              <button
+                type="button"
+                disabled={bulkDeleteCompletedMutation.isPending}
+                onClick={() => {
+                  if (window.confirm('Clean up completed and failed runs from history?')) {
+                    bulkDeleteCompletedMutation.mutate();
+                  }
+                }}
+                className="btn btn-ghost px-2.5 py-1.5 text-xs text-carbon-400 hover:text-rose-300 hover:bg-rose-500/10"
+              >
+                <Trash2 className="mr-1 h-3.5 w-3.5" />
+                {bulkDeleteCompletedMutation.isPending ? 'Cleaning…' : 'Clear Finished'}
+              </button>
+            )}
+            {startedExperimentId && (
+              <div className="rounded-lg border border-brand-500/40 bg-brand-500/10 px-3 py-1 font-mono text-[11px] font-semibold text-brand-200">
+                Active: #{startedExperimentId}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Filter Controls & Search */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-carbon-800 bg-carbon-900/40 p-3">
+          {/* Tab Filter */}
+          <div className="flex flex-wrap items-center gap-1.5">
             <button
-              key={run.id}
               type="button"
-              onClick={() => {
-                setStartedExperimentId(run.id);
-                setActiveExperiment(run.id);
-                setLogFilter('all');
-              }}
-              className={`rounded-xl border p-4 text-left transition ${
-                startedExperimentId === run.id
-                  ? 'border-brand-500/50 bg-brand-500/10 shadow-glow-brand'
-                  : 'border-carbon-700/70 bg-carbon-850/40 hover:border-carbon-600 hover:bg-carbon-800/60'
+              onClick={() => setHistoryFilter('all')}
+              className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                historyFilter === 'all'
+                  ? 'bg-brand-500 text-white shadow-glow-brand'
+                  : 'text-carbon-400 hover:bg-carbon-800 hover:text-carbon-200'
               }`}
             >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold text-carbon-100">
-                    <span className="font-mono text-brand-300">#{run.id}</span> {run.name}
-                  </div>
-                  <div className="mt-1 font-mono text-[11px] text-carbon-400">{run.strategy}</div>
-                </div>
-                <div className="flex flex-shrink-0 items-center gap-2">
-                  <Badge value={run.status} />
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      if (window.confirm(`Remove experiment #${run.id}?`)) {
-                        deleteMutation.mutate(run.id);
-                      }
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        if (window.confirm(`Remove experiment #${run.id}?`)) {
-                          deleteMutation.mutate(run.id);
-                        }
-                      }
-                    }}
-                    className="rounded-md border border-rose-500/30 bg-rose-500/5 px-2 py-1 text-[11px] font-semibold text-rose-300 hover:bg-rose-500/15"
-                  >
-                    Remove
-                  </span>
-                </div>
-              </div>
-              <div className="mt-3 font-mono text-[11px] text-carbon-500">
-                started {run.started_at ? new Date(run.started_at).toLocaleString() : 'not yet'}
-              </div>
+              All Programs ({groupCounts.all})
             </button>
-          ))}
-          {sortedPreviousRuns.length === 0 && (
-            <div className="rounded-xl border border-dashed border-carbon-700 p-6 text-sm text-carbon-400">
-              No previous runs yet.
-            </div>
-          )}
-        </div>
-      </section>
+            <button
+              type="button"
+              onClick={() => setHistoryFilter('running')}
+              className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                historyFilter === 'running'
+                  ? 'bg-amber-500 text-carbon-950 font-bold'
+                  : 'text-carbon-400 hover:bg-carbon-800 hover:text-amber-300'
+              }`}
+            >
+              🔥 Hunting ({groupCounts.running})
+            </button>
+            <button
+              type="button"
+              onClick={() => setHistoryFilter('paused')}
+              className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                historyFilter === 'paused'
+                  ? 'bg-amber-500/30 text-amber-200 border border-amber-500/50'
+                  : 'text-carbon-400 hover:bg-carbon-800 hover:text-amber-200'
+              }`}
+            >
+              ⏸️ Paused ({groupCounts.paused})
+            </button>
+            <button
+              type="button"
+              onClick={() => setHistoryFilter('hits')}
+              className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                historyFilter === 'hits'
+                  ? 'bg-emerald-500 text-carbon-950 font-bold shadow-glow-emerald'
+                  : 'text-carbon-400 hover:bg-carbon-800 hover:text-emerald-300'
+              }`}
+            >
+              ⚡ With Hits ({groupCounts.hits})
+            </button>
+            <button
+              type="button"
+              onClick={() => setHistoryFilter('completed')}
+              className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                historyFilter === 'completed'
+                  ? 'bg-carbon-700 text-carbon-100'
+                  : 'text-carbon-400 hover:bg-carbon-800 hover:text-carbon-200'
+              }`}
+            >
+              Completed ({groupCounts.completed})
+            </button>
+          </div>
 
-      {/* Workflow runbook */}
-      <section className="panel">
-        <SectionHeader
-          title="Workflow runbook"
-          hint="Recon maps the attack surface first, then vuln engines test the discovered inputs."
-        />
-        <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
-          {runbook.map((step) => (
-            <div key={step.id} className={`rounded-xl border bg-carbon-850/40 p-4 transition ${runbookAccent[step.state]}`}>
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="font-mono text-[10px] font-semibold uppercase tracking-wide text-brand-300">{step.phase}</div>
-                  <div className="mt-1 text-sm font-semibold text-carbon-100">{step.title}</div>
+          {/* Search bar */}
+          <div className="relative min-w-[220px]">
+            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-carbon-500" />
+            <input
+              type="text"
+              value={historySearch}
+              onChange={(e) => setHistorySearch(e.target.value)}
+              placeholder="Search program or target…"
+              className="w-full rounded-lg border border-carbon-700 bg-carbon-950/80 py-1.5 pl-8 pr-7 text-xs text-carbon-100 placeholder-carbon-500 focus:border-brand-500 focus:outline-none"
+            />
+            {historySearch && (
+              <button
+                type="button"
+                onClick={() => setHistorySearch('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-carbon-400 hover:text-carbon-100"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Program-Grouped Fleet List */}
+        <div className="divide-y divide-carbon-800/80">
+          {filteredProgramGroups.map((group) => {
+            const isGroupExpanded = expandedPrograms[group.programKey] ?? (group.activeCount > 0 || group.runs.some((r) => r.id === startedExperimentId));
+            const hasActive = group.activeCount > 0;
+            const hasSelected = group.runs.some((r) => r.id === startedExperimentId);
+
+            return (
+              <div key={group.programKey} className="transition">
+                {/* Program Header Row */}
+                <div
+                  onClick={() => toggleProgram(group.programKey)}
+                  className={`flex flex-col gap-3 p-4 transition cursor-pointer md:flex-row md:items-center justify-between ${
+                    hasActive
+                      ? 'bg-amber-500/[0.06] border-l-4 border-l-amber-400'
+                      : hasSelected
+                      ? 'bg-brand-500/[0.05] border-l-4 border-l-brand-500'
+                      : 'hover:bg-carbon-850/60'
+                  }`}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <button
+                      type="button"
+                      className="text-carbon-400 hover:text-carbon-100 flex-shrink-0"
+                    >
+                      {isGroupExpanded ? (
+                        <ChevronDown className="h-4 w-4" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4" />
+                      )}
+                    </button>
+
+                    <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-carbon-800 border border-carbon-700/80 text-brand-400 flex-shrink-0">
+                      <Trophy className="h-4 w-4" />
+                    </span>
+
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-bold text-sm text-carbon-100 group-hover:text-white truncate">
+                          {group.programName}
+                        </span>
+                        <span className="font-mono text-xs text-carbon-400">
+                          @{group.programHandle}
+                        </span>
+                      </div>
+
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                        {hasActive && (
+                          <span className="flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-300 animate-pulse">
+                            <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+                            {group.activeCount} Active
+                          </span>
+                        )}
+
+                        {group.pausedCount > 0 && (
+                          <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 font-mono text-[11px] text-amber-200">
+                            ⏸️ {group.pausedCount} Paused
+                          </span>
+                        )}
+
+                        {group.findingsCount > 0 && (
+                          <span className="flex items-center gap-1 rounded-full border border-rose-500/40 bg-rose-500/15 px-2 py-0.5 text-[11px] font-bold text-rose-300 shadow-glow-rose">
+                            <Bug className="h-3 w-3 text-rose-400" />
+                            {group.findingsCount} Findings
+                          </span>
+                        )}
+
+                        {group.completedCount > 0 && (
+                          <span className="flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-300">
+                            <CheckCircle2 className="h-3 w-3" />
+                            {group.completedCount} Completed
+                          </span>
+                        )}
+
+                        <span className="rounded bg-carbon-800 border border-carbon-700/80 px-2 py-0.5 font-mono text-[10px] text-carbon-400">
+                          {group.runs.length} Asset Hunts
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Program Group Actions */}
+                  <div className="flex flex-wrap items-center gap-2 ml-7 md:ml-0" onClick={(e) => e.stopPropagation()}>
+                    {group.targetId && (
+                      <button
+                        type="button"
+                        disabled={huntProgramMutation.isPending}
+                        onClick={() => huntProgramMutation.mutate(group.targetId!)}
+                        className="rounded-lg border border-carbon-700 bg-carbon-800 px-3 py-1.5 text-xs font-semibold text-carbon-200 hover:bg-carbon-700 hover:text-white flex items-center gap-1 transition"
+                      >
+                        <RotateCcw className="h-3 w-3" />
+                        Re-hunt Program
+                      </button>
+                    )}
+
+                    {group.targetId && (
+                      <Link
+                        to={`/programs/${group.targetId}`}
+                        className="rounded-lg border border-carbon-700 bg-carbon-800/80 px-2.5 py-1.5 text-xs text-brand-300 hover:bg-carbon-700 flex items-center gap-1"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                        Program Scope
+                      </Link>
+                    )}
+                  </div>
                 </div>
-                <span className={`mt-1 h-2.5 w-2.5 flex-shrink-0 rounded-full ${runbookDot[step.state]}`} />
-              </div>
-              <p className="mt-2 text-xs leading-5 text-carbon-400">{step.detail}</p>
-              <div className="mt-3 flex items-center justify-between">
-                <Badge value={step.state} />
-                {typeof step.count === 'number' && (
-                  <span className="font-mono text-[11px] text-carbon-500">obs: {step.count}</span>
+
+                {/* Sub-runs list under expanded program */}
+                {isGroupExpanded && (
+                  <div className="bg-carbon-950/40 border-t border-carbon-800/60 pl-6 sm:pl-10 divide-y divide-carbon-800/40">
+                    {group.runs.map((run) => {
+                      const isSelected = startedExperimentId === run.id;
+                      return (
+                        <div
+                          key={run.id}
+                          onClick={() => {
+                            setStartedExperimentId(run.id);
+                            setActiveExperiment(run.id);
+                            setLogFilter('all');
+                          }}
+                          className={`flex flex-col justify-between gap-2.5 p-3.5 transition cursor-pointer md:flex-row md:items-center ${
+                            isSelected
+                              ? 'bg-brand-500/10 border-l-2 border-l-brand-500'
+                              : 'hover:bg-carbon-850/40'
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-mono text-xs font-bold text-brand-400">#{run.id}</span>
+                              <span className="font-semibold text-xs text-carbon-200 group-hover:text-white truncate">
+                                {run.name || `Target Hunt #${run.id}`}
+                              </span>
+                              <Badge value={run.status} />
+                              <span className="rounded bg-carbon-800 px-1.5 py-0.5 font-mono text-[9px] text-carbon-400">
+                                {run.strategy}
+                              </span>
+                            </div>
+
+                            <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-carbon-400 font-mono">
+                              <span>
+                                {run.started_at ? new Date(run.started_at).toLocaleTimeString() : 'Not started'}
+                              </span>
+                              {run.completed_at && (
+                                <span>
+                                  · finished {new Date(run.completed_at).toLocaleTimeString()}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                            {run.status === 'running' ? (
+                              <button
+                                type="button"
+                                disabled={pauseMutation.isPending}
+                                onClick={() => pauseMutation.mutate(run.id)}
+                                className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-300 hover:bg-amber-500/20"
+                              >
+                                <Pause className="mr-1 inline h-3 w-3" />
+                                Pause
+                              </button>
+                            ) : run.status === 'paused' ? (
+                              <button
+                                type="button"
+                                disabled={resumeMutation.isPending}
+                                onClick={() => {
+                                  setStartedExperimentId(run.id);
+                                  setActiveExperiment(run.id);
+                                  resumeMutation.mutate(run.id);
+                                }}
+                                className="rounded-md border border-brand-500/50 bg-brand-600 px-2.5 py-1 text-xs font-semibold text-white shadow-glow-brand hover:bg-brand-500"
+                              >
+                                <Play className="mr-1 inline h-3 w-3" />
+                                Resume
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={resumeMutation.isPending}
+                                onClick={() => {
+                                  setStartedExperimentId(run.id);
+                                  setActiveExperiment(run.id);
+                                  resumeMutation.mutate(run.id);
+                                }}
+                                className="rounded-md border border-carbon-700 bg-carbon-800 px-2.5 py-1 text-xs font-medium text-carbon-200 hover:bg-carbon-700 hover:text-white"
+                              >
+                                <RotateCcw className="mr-1 inline h-3 w-3" />
+                                Re-run
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setStartedExperimentId(run.id);
+                                setActiveExperiment(run.id);
+                                setLogFilter('all');
+                              }}
+                              className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
+                                isSelected
+                                  ? 'bg-brand-500/20 text-brand-300 border border-brand-500/40'
+                                  : 'border border-carbon-700 bg-carbon-800/80 text-carbon-300 hover:bg-carbon-700 hover:text-carbon-100'
+                              }`}
+                            >
+                              {isSelected ? 'Active' : 'Monitor'}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (window.confirm(`Delete hunt #${run.id} (${run.name})?`)) {
+                                  deleteMutation.mutate(run.id);
+                                }
+                              }}
+                              className="rounded-md p-1 text-carbon-500 hover:bg-rose-500/15 hover:text-rose-300"
+                              title="Remove run"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
+            );
+          })}
+
+          {filteredProgramGroups.length === 0 && (
+            <div className="p-8 text-center text-sm text-carbon-400">
+              No program hunts match your filter or search.
             </div>
-          ))}
+          )}
         </div>
       </section>
 
@@ -699,7 +1298,7 @@ const ScanPage = () => {
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-3">
                   <h2 className="font-display text-xl font-bold tracking-tight text-carbon-100">{formatStage(monitor.stage)}</h2>
-                  <Badge value={monitor.experiment.status} />
+                <Badge value={monitor.stage === 'inconclusive' ? 'inconclusive' : monitor.experiment.status} />
                 </div>
                 <p className="mt-1.5 text-sm text-carbon-300">{monitor.stage_detail}</p>
                 <div className="mt-3 flex items-start gap-2 rounded-xl border border-brand-500/25 bg-brand-500/10 px-3.5 py-2.5">
@@ -731,33 +1330,188 @@ const ScanPage = () => {
               </div>
             </div>
 
+            <div
+              className={`mb-5 rounded-2xl border p-4 ${
+                monitor.stage === 'inconclusive'
+                  ? 'border-amber-500/35 bg-amber-500/[0.07]'
+                  : progressState === 'error' || monitor.experiment.status === 'failed'
+                  ? 'border-rose-500/35 bg-rose-500/[0.07]'
+                  : heartbeatStale
+                    ? 'border-amber-500/35 bg-amber-500/[0.07]'
+                    : progressState === 'done' || monitor.experiment.status === 'completed'
+                      ? 'border-emerald-500/30 bg-emerald-500/[0.06]'
+                      : 'border-cyan-500/30 bg-cyan-500/[0.06]'
+              }`}
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex min-w-0 items-start gap-3">
+                  <span className="mt-0.5 flex h-9 w-9 flex-none items-center justify-center rounded-xl border border-current/15 bg-carbon-950/40">
+                    {monitor.stage === 'inconclusive' ? (
+                      <AlertTriangle className="h-4.5 w-4.5 text-amber-300" />
+                    ) : progressState === 'error' || monitor.experiment.status === 'failed' ? (
+                      <AlertTriangle className="h-4.5 w-4.5 text-rose-300" />
+                    ) : monitor.experiment.status === 'running' ? (
+                      <LoaderCircle className="h-4.5 w-4.5 animate-spin text-cyan-300 motion-reduce:animate-none" />
+                    ) : (
+                      <Activity className="h-4.5 w-4.5 text-emerald-300" />
+                    )}
+                  </span>
+                  <div className="min-w-0">
+                    <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-carbon-400">
+                      What the scanner is doing now
+                    </div>
+                    <div className="mt-1 text-sm font-semibold text-carbon-100">
+                      {liveProgress?.message || monitor.stage_detail}
+                    </div>
+                    {(liveProgress?.detail || heartbeatStale) && (
+                      <div className={`mt-1.5 text-xs leading-relaxed ${heartbeatStale ? 'text-amber-200' : 'text-carbon-300'}`}>
+                        {heartbeatStale
+                          ? `No new heartbeat for ${formatDuration(heartbeatAge)}. The scan may be waiting on a page, proxy, or external tool; check Engine decisions below.`
+                          : liveProgress?.detail}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <Badge value={monitor.stage === 'inconclusive' ? 'inconclusive' : progressState} />
+              </div>
+
+              <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-xl border border-carbon-700/70 bg-carbon-950/35 px-3 py-2.5">
+                  <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-carbon-500">
+                    <Wrench className="h-3.5 w-3.5" /> Tool
+                  </div>
+                  <div className="mt-1 truncate text-xs font-semibold text-carbon-200">{liveProgress?.tool || 'scan orchestrator'}</div>
+                </div>
+                <div className="rounded-xl border border-carbon-700/70 bg-carbon-950/35 px-3 py-2.5">
+                  <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-carbon-500">
+                    <Clock3 className="h-3.5 w-3.5" /> Elapsed
+                  </div>
+                  <div className="mt-1 text-xs font-semibold tabnum text-carbon-200">{formatDuration(monitor.elapsed_seconds)}</div>
+                </div>
+                <div className="rounded-xl border border-carbon-700/70 bg-carbon-950/35 px-3 py-2.5">
+                  <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-carbon-500">Current step</div>
+                  <div className="mt-1 truncate text-xs font-semibold text-carbon-200">
+                    {liveProgress?.completed != null && liveProgress?.total
+                      ? `${liveProgress.completed} / ${liveProgress.total}`
+                      : liveProgress?.phase?.replace(/_/g, ' ') || monitor.stage.replace(/_/g, ' ')}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-carbon-700/70 bg-carbon-950/35 px-3 py-2.5">
+                  <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-carbon-500">Last heartbeat</div>
+                  <div className={`mt-1 text-xs font-semibold tabnum ${heartbeatStale ? 'text-amber-200' : 'text-carbon-200'}`}>
+                    {liveProgress?.updated_at ? `${formatDuration(heartbeatAge)} ago` : 'Waiting for first update'}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* River-to-Sea Fluid Telemetry & Micro-State Pipeline */}
+            <RiverFlowMonitor monitor={monitor} className="mb-5" />
+
             <div className="mb-5 flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                disabled={monitor.experiment.status !== 'running' || pauseMutation.isPending}
-                onClick={() => pauseMutation.mutate(monitor.experiment.id)}
-                className="btn btn-ghost px-3 py-2"
+              {monitor.experiment.status === 'running' ? (
+                <button
+                  type="button"
+                  disabled={pauseMutation.isPending}
+                  onClick={() => pauseMutation.mutate(monitor.experiment.id)}
+                  className="btn btn-ghost px-3.5 py-2 text-amber-300 hover:bg-amber-500/15"
+                >
+                  <Pause className="mr-1.5 h-4 w-4" />
+                  {pauseMutation.isPending ? 'Pausing…' : 'Pause Hunt'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={resumeMutation.isPending}
+                  onClick={() => resumeMutation.mutate(monitor.experiment.id)}
+                  className="btn btn-primary px-3.5 py-2 shadow-glow-brand"
+                >
+                  <Play className="mr-1.5 h-4 w-4" />
+                  {resumeMutation.isPending ? 'Resuming…' : 'Resume Hunt'}
+                </button>
+              )}
+              <Link
+                to="/live"
+                className="btn btn-ghost px-3.5 py-2 text-brand-300 hover:bg-brand-500/10"
               >
-                {pauseMutation.isPending ? 'Pausing…' : '❚❚ Pause'}
-              </button>
-              <button
-                type="button"
-                disabled={monitor.experiment.status !== 'paused' || resumeMutation.isPending}
-                onClick={() => resumeMutation.mutate(monitor.experiment.id)}
-                className="btn btn-primary px-3 py-2"
+                <Zap className="mr-1.5 h-4 w-4" />
+                Live Fuzz Canvas
+              </Link>
+              <Link
+                to="/findings"
+                className="btn btn-ghost px-3.5 py-2 text-emerald-300 hover:bg-emerald-500/10"
               >
-                {resumeMutation.isPending ? 'Resuming…' : '▶ Resume'}
-              </button>
+                <Bug className="mr-1.5 h-4 w-4" />
+                View Findings ({monitor.recent_findings?.length || 0})
+              </Link>
+              <a
+                href={`/api/v1/experiments/${monitor.experiment.id}/audit`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-ghost px-3.5 py-2 text-cyan-300 hover:bg-cyan-500/10"
+              >
+                <Layers className="mr-1.5 h-4 w-4" />
+                Full forensic audit
+              </a>
+              <a
+                href={`/api/v1/logs/export?experiment_id=${monitor.experiment.id}`}
+                className="btn btn-ghost px-3.5 py-2 text-violet-300 hover:bg-violet-500/10"
+                download
+              >
+                <ExternalLink className="mr-1.5 h-4 w-4" />
+                Download all events
+              </a>
               {report?.html_url && (
-                <a href={report.html_url} target="_blank" rel="noopener noreferrer" className="btn btn-success px-3 py-2">
+                <a href={report.html_url} target="_blank" rel="noopener noreferrer" className="btn btn-success px-3 py-2 ml-auto">
+                  <ExternalLink className="mr-1.5 h-4 w-4" />
                   Open final report
                 </a>
               )}
-              {report?.markdown_url && (
-                <a href={report.markdown_url} target="_blank" rel="noopener noreferrer" className="btn btn-ghost px-3 py-2">
-                  Markdown result
-                </a>
-              )}
+            </div>
+
+            <div className="mb-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-xl border border-carbon-700/70 bg-carbon-950/35 p-3">
+                <div className="font-mono text-[10px] uppercase tracking-wider text-carbon-500">Burp REST</div>
+                <div className={`mt-1 text-sm font-semibold ${monitor.experiment.limits?.burp_task_id ? 'text-emerald-300' : 'text-amber-300'}`}>
+                  {monitor.experiment.limits?.burp_task_id ? 'Used by this run' : 'No attributed task'}
+                </div>
+                <div className="mt-1 line-clamp-2 text-[11px] text-carbon-400">
+                  {monitor.experiment.limits?.burp_scan_message || monitor.experiment.limits?.burp_status || 'No Burp REST evidence recorded.'}
+                </div>
+              </div>
+              <div className="rounded-xl border border-carbon-700/70 bg-carbon-950/35 p-3">
+                <div className="font-mono text-[10px] uppercase tracking-wider text-carbon-500">Burp extension</div>
+                <div className={`mt-1 text-sm font-semibold ${monitor.experiment.limits?.burp_extension_activity?.used ? 'text-emerald-300' : 'text-amber-300'}`}>
+                  {monitor.experiment.limits?.burp_extension_activity?.used ? 'Traffic received' : 'No attributed traffic'}
+                </div>
+                <div className="mt-1 text-[11px] text-carbon-400">
+                  {monitor.experiment.limits?.burp_extension_activity?.items || 0} imported item(s)
+                </div>
+              </div>
+              <div className="rounded-xl border border-carbon-700/70 bg-carbon-950/35 p-3">
+                <div className="font-mono text-[10px] uppercase tracking-wider text-carbon-500">Local LLM</div>
+                <div className={`mt-1 text-sm font-semibold ${monitor.experiment.limits?.llm_mode === 'available' ? 'text-emerald-300' : 'text-amber-300'}`}>
+                  {monitor.experiment.limits?.llm_mode === 'available'
+                    ? 'Available to advisors'
+                    : monitor.experiment.limits?.llm_mode === 'deterministic_only'
+                      ? 'Unavailable · deterministic only'
+                      : 'Participation not recorded'}
+                </div>
+                <div className="mt-1 line-clamp-2 text-[11px] text-carbon-400">
+                  {monitor.experiment.limits?.llm_preflight?.model || 'No successful model preflight recorded.'}
+                </div>
+              </div>
+              <div className="rounded-xl border border-carbon-700/70 bg-carbon-950/35 p-3">
+                <div className="font-mono text-[10px] uppercase tracking-wider text-carbon-500">Browser oracle</div>
+                <div className={`mt-1 text-sm font-semibold ${(monitor.performance_metrics?.total_executions || 0) > 0 ? 'text-emerald-300' : 'text-amber-300'}`}>
+                  {monitor.performance_metrics?.total_executions || 0} real execution(s)
+                </div>
+                <div className="mt-1 text-[11px] text-carbon-400">
+                  {monitor.performance_metrics?.oracle_hit_count || 0} hit · {monitor.performance_metrics?.oracle_miss_count || 0} miss · {monitor.performance_metrics?.oracle_error_count || 0} error
+                </div>
+              </div>
             </div>
 
             {monitor.pipeline_stages?.length > 0 && (
@@ -880,7 +1634,11 @@ const ScanPage = () => {
             <KpiCard size="sm" tone="danger" label="Findings" value={monitor.recent_findings.length} />
           </div>
 
-          <EndpointsMap targetId={monitor.target.id} monitor={monitor} />
+          {/* Live Browser Vision Preview */}
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+            <LiveBrowserPreview />
+            <EndpointsMap targetId={monitor.target.id} monitor={monitor} />
+          </div>
 
           {/* Confirmed Findings Alerts */}
           {monitor.recent_findings.length > 0 && (
@@ -1089,12 +1847,26 @@ const ScanPage = () => {
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge value={check.status} />
                         <span className="text-sm font-semibold text-carbon-100">{check.param_name}</span>
-                        {check.context_type && <span className="font-mono text-[11px] font-medium text-brand-300">{check.context_type}</span>}
+                        <span className="rounded bg-carbon-800 px-1.5 py-0.5 font-mono text-[10px] text-carbon-400">
+                          ({check.param_location || 'query'})
+                        </span>
+                        {check.context_type && (
+                          <span className="rounded border border-brand-500/30 bg-brand-500/10 px-1.5 py-0.5 font-mono text-[10px] font-medium text-brand-300">
+                            Context: {check.context_type}
+                          </span>
+                        )}
+                        {check.sinks && check.sinks.length > 0 && (
+                          <span className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-amber-300">
+                            Sink: {check.sinks.join(', ')}
+                          </span>
+                        )}
                       </div>
                       <span className="font-mono text-[11px] text-carbon-500">priority {check.priority}</span>
                     </div>
-                    <div className="mt-2 truncate font-mono text-[11px] text-carbon-400">{check.endpoint_method} {check.endpoint_url}</div>
-                    <div className="terminal mt-2 p-3 text-xs text-carbon-200">{check.payload_preview}</div>
+                    <div className="mt-2 truncate font-mono text-[11px] text-carbon-400">
+                      <span className="font-bold text-carbon-300">{check.endpoint_method}</span> {check.endpoint_url}
+                    </div>
+                    <div className="terminal mt-2 p-3 text-xs text-carbon-200 select-all break-all">{check.payload_preview}</div>
                   </div>
                 ))}
                 {activePayloads.length === 0 && (
@@ -1108,49 +1880,336 @@ const ScanPage = () => {
             <section className="panel">
               <SectionHeader title="Latest results" hint="Clean result view: hit, missed, or error with the reason." />
               <div className="divide-y divide-carbon-700/40">
-                {latestResults.map((execution) => (
-                  <div key={execution.id} className="p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge value={execution.oracle_status} />
-                        <span className="text-sm font-semibold text-carbon-100">Payload #{execution.test_case_id}</span>
-                        <span className="text-sm text-carbon-300">{execution.param_name || '-'}</span>
+                {latestResults.map((execution) => {
+                  const isExpanded = !!expandedExecutions[execution.id];
+                  return (
+                    <div key={execution.id} className="p-4 transition hover:bg-carbon-850/30">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge value={execution.oracle_status} />
+                          <span className="text-sm font-semibold text-carbon-100">Payload #{execution.test_case_id}</span>
+                          <span className="text-sm font-medium text-carbon-300">{execution.param_name || '-'}</span>
+                          {execution.param_location && (
+                            <span className="rounded bg-carbon-800 px-1.5 py-0.5 font-mono text-[10px] text-carbon-400">
+                              ({execution.param_location})
+                            </span>
+                          )}
+                          {execution.context_type && (
+                            <span className="rounded border border-brand-500/25 bg-brand-500/10 px-1.5 py-0.5 font-mono text-[10px] text-brand-300">
+                              {execution.context_type}
+                            </span>
+                          )}
+                          {execution.sinks && execution.sinks.length > 0 && (
+                            <span className="rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[10px] text-amber-300">
+                              Sink: {execution.sinks.join(', ')}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {execution.status_code && (
+                            <span className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-bold ${
+                              execution.status_code < 400 ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300'
+                            }`}>
+                              HTTP {execution.status_code}
+                            </span>
+                          )}
+                          <span className="font-mono text-[11px] text-carbon-500">
+                            {execution.duration_ms ? `${execution.duration_ms}ms` : '-'} · {formatTime(execution.executed_at)}
+                          </span>
+                        </div>
                       </div>
-                      <span className="font-mono text-[11px] text-carbon-500">
-                        {execution.duration_ms ? `${execution.duration_ms}ms` : '-'} · {formatTime(execution.executed_at)}
-                      </span>
-                    </div>
-                    <div className="mt-2 truncate font-mono text-[11px] text-carbon-400">{execution.endpoint_url || '-'}</div>
-                    <div className={`mt-2 rounded-lg border p-3 text-sm ${
-                      execution.oracle_status === 'error' ? 'border-rose-500/25 bg-rose-500/10 text-rose-200' : execution.oracle_status === 'hit' ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200' : 'border-carbon-700/60 bg-carbon-850/50 text-carbon-300'
-                    }`}>
-                      {summarizeExecutionLog(execution.logs) || (execution.oracle_status === 'missed' ? 'No execution callback observed for this payload.' : 'No extra browser details.')}
-                    </div>
-                    {execution.oracle_status === 'hit' && execution.payload && (
-                      <div className="mt-3 flex items-center gap-2">
-                        <a
-                          href={getExploitUrlFromExecution(execution)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 rounded-md bg-gradient-to-r from-rose-600 to-rose-500 px-3 py-1.5 text-xs font-semibold text-white shadow-glow-rose transition hover:brightness-110"
-                        >
-                          💥 Trigger XSS in target
-                        </a>
+
+                      <div className="mt-1.5 truncate font-mono text-[11px] text-carbon-400">
+                        <span className="font-bold text-carbon-300">{execution.endpoint_method || 'GET'}</span> {execution.endpoint_url || '-'}
+                      </div>
+
+                      <div className={`mt-2 rounded-lg border p-3 text-xs leading-relaxed ${
+                        execution.oracle_status === 'error'
+                          ? 'border-rose-500/25 bg-rose-500/10 text-rose-200'
+                          : execution.oracle_status === 'hit'
+                          ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200'
+                          : 'border-carbon-700/60 bg-carbon-850/50 text-carbon-300'
+                      }`}>
+                        {summarizeExecutionLog(execution.logs) || (execution.oracle_status === 'missed' ? 'No execution callback observed for this payload.' : 'No extra browser details.')}
+                      </div>
+
+                      {/* Action buttons & Drawer toggle */}
+                      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                         <button
                           type="button"
-                          onClick={() => {
-                            const link = getExploitUrlFromExecution(execution);
-                            navigator.clipboard.writeText(link);
-                            alert('Exploit URL copied to clipboard!');
-                          }}
-                          className="rounded-md border border-carbon-600 bg-carbon-800/60 px-3 py-1.5 text-xs font-medium text-carbon-200 transition hover:bg-carbon-750"
+                          onClick={() => toggleExecution(execution.id)}
+                          className="flex items-center gap-1 text-xs font-semibold text-brand-300 transition hover:text-brand-200"
                         >
-                          📋 Copy link
+                          <span>{isExpanded ? '▲ Hide Response & Context' : '▼ Inspect Full Response, Sink & DOM'}</span>
                         </button>
+
+                        {execution.oracle_status === 'hit' && execution.payload && (
+                          <div className="flex items-center gap-2">
+                            <a
+                              href={getExploitUrlFromExecution(execution)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 rounded-md bg-gradient-to-r from-rose-600 to-rose-500 px-3 py-1 text-xs font-semibold text-white shadow-glow-rose transition hover:brightness-110"
+                            >
+                              💥 Trigger XSS
+                            </a>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const link = getExploitUrlFromExecution(execution);
+                                navigator.clipboard.writeText(link);
+                                alert('Exploit URL copied to clipboard!');
+                              }}
+                              className="rounded-md border border-carbon-600 bg-carbon-800/60 px-2.5 py-1 text-xs font-medium text-carbon-200 transition hover:bg-carbon-750"
+                            >
+                              📋 Copy URL
+                            </button>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                ))}
+
+                      {/* Expandable Deep Inspection Drawer */}
+                      {isExpanded && (
+                        <div className="mt-3 space-y-3 rounded-xl border border-carbon-700/80 bg-carbon-950/80 p-4 text-xs font-mono animate-rise">
+                          {/* Attack & Context Header */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 border-b border-carbon-800 pb-3">
+                            <div>
+                              <span className="text-[10px] text-carbon-400 uppercase font-bold block">Reflected Context</span>
+                              <span className="font-semibold text-brand-300">{execution.context_type || 'DOM / HTML'}</span>
+                              {execution.context_tag && <span className="text-carbon-400 text-[10px] ml-1">&lt;{execution.context_tag}&gt;</span>}
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-carbon-400 uppercase font-bold block">Target Sink</span>
+                              <span className="font-semibold text-amber-300">
+                                {execution.sinks && execution.sinks.length > 0 ? execution.sinks.join(', ') : 'Direct DOM / Script'}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-carbon-400 uppercase font-bold block">Injected Parameter</span>
+                              <span className="font-semibold text-fuchsia-300">
+                                {execution.param_name || '-'} ({execution.param_location || 'query'})
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-carbon-400 uppercase font-bold block">HTTP Status & Timing</span>
+                              <span className={`font-semibold ${execution.status_code && execution.status_code < 400 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                                {execution.status_code ? `HTTP ${execution.status_code}` : 'Loaded in Chrome'} ({execution.duration_ms || '-'}ms)
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Full Injected Payload */}
+                          <div>
+                            <div className="flex items-center justify-between text-[10px] text-carbon-400 uppercase font-bold mb-1">
+                              <span>Full Injected Payload</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (execution.payload) {
+                                    navigator.clipboard.writeText(execution.payload);
+                                    alert('Payload copied to clipboard!');
+                                  }
+                                }}
+                                className="text-brand-300 hover:text-brand-200"
+                              >
+                                📋 Copy Payload
+                              </button>
+                            </div>
+                            <div className="terminal p-2.5 text-xs text-brand-200 select-all break-all max-h-28 overflow-y-auto">
+                              {execution.payload || 'No payload recorded'}
+                            </div>
+                          </div>
+
+                          {/* Rendered DOM Response / Reflection */}
+                          {execution.dom_snapshot ? (
+                            <div>
+                              <span className="text-[10px] text-carbon-400 uppercase font-bold block mb-1">Rendered DOM Response / Reflection</span>
+                              <div className="terminal p-2.5 text-xs text-emerald-300 select-all max-h-36 overflow-y-auto whitespace-pre-wrap break-all">
+                                {execution.dom_snapshot}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="text-[11px] text-carbon-500 italic">No rendered DOM snapshot stored for this execution.</div>
+                          )}
+
+                          {/* Response Headers */}
+                          {execution.response_headers && Object.keys(execution.response_headers).length > 0 && (
+                            <div>
+                              <span className="text-[10px] text-carbon-400 uppercase font-bold block mb-1">Response Headers</span>
+                              <div className="rounded-lg bg-carbon-900/90 p-2 text-[11px] text-carbon-300 max-h-28 overflow-y-auto space-y-0.5">
+                                {Object.entries(execution.response_headers).map(([k, v]) => (
+                                  <div key={k} className="flex gap-2">
+                                    <span className="text-carbon-400 font-semibold">{k}:</span>
+                                    <span className="truncate text-carbon-200">{String(v)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Structured response security posture */}
+                          {execution.response_posture && (
+                            <div>
+                              <div className="mb-1 flex items-center justify-between gap-2">
+                                <span className="text-[10px] text-carbon-400 uppercase font-bold">Response Security Posture</span>
+                                <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                                  execution.response_posture.assessment?.metadata_observed
+                                    ? 'bg-emerald-500/15 text-emerald-300'
+                                    : 'bg-amber-500/15 text-amber-300'
+                                }`}>
+                                  {execution.response_posture.assessment?.metadata_observed ? 'Observed' : 'Metadata unavailable'}
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2 rounded-lg border border-carbon-700/70 bg-carbon-900/90 p-2 sm:grid-cols-4">
+                                {[
+                                  { label: 'CSP', state: execution.response_posture.observations?.csp?.state },
+                                  { label: 'Trusted Types', state: execution.response_posture.observations?.trusted_types?.state },
+                                  { label: 'CORS', state: execution.response_posture.observations?.cors?.state },
+                                  { label: 'Cache', state: execution.response_posture.observations?.cache?.shared_cache_exposure || execution.response_posture.observations?.cache?.state },
+                                ].map(({ label, state }) => (
+                                  <div key={label} className="min-w-0">
+                                    <span className="block text-[9px] font-bold uppercase text-carbon-500">{label}</span>
+                                    <span className="block truncate text-[11px] text-carbon-200">{state || 'unknown'}</span>
+                                  </div>
+                                ))}
+                              </div>
+                              {execution.response_posture.evidence && execution.response_posture.evidence.length > 0 && (
+                                <div className="mt-2 space-y-1">
+                                  {execution.response_posture.evidence.slice(0, 4).map((item) => (
+                                    <div key={item.code} className="rounded border border-carbon-700/60 bg-carbon-850/60 px-2 py-1 text-[10px] text-carbon-300">
+                                      <span className="mr-1 font-bold text-brand-300">{item.code}</span>
+                                      {item.summary}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* V8 source-region activation. This is reachability evidence, not data-flow proof. */}
+                          {execution.runtime_code_coverage && (
+                            <div>
+                              <div className="mb-1 flex items-center justify-between gap-2">
+                                <span className="text-[10px] text-carbon-400 uppercase font-bold">Runtime Code Activation</span>
+                                <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                                  execution.runtime_code_coverage.available
+                                    ? 'bg-sky-500/15 text-sky-300'
+                                    : 'bg-amber-500/15 text-amber-300'
+                                }`}>
+                                  {execution.runtime_code_coverage.available ? 'V8 observed' : 'Unavailable'}
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-3 gap-2 rounded-lg border border-carbon-700/70 bg-carbon-900/90 p-2">
+                                <div>
+                                  <span className="block text-[9px] font-bold uppercase text-carbon-500">Scripts</span>
+                                  <span className="text-[11px] text-carbon-200">{execution.runtime_code_coverage.summary?.scripts_analyzed ?? 0}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[9px] font-bold uppercase text-carbon-500">Reached sites</span>
+                                  <span className="text-[11px] text-carbon-200">{execution.runtime_code_coverage.summary?.runtime_reached_sites ?? 0}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[9px] font-bold uppercase text-carbon-500">Phases</span>
+                                  <span className="text-[11px] text-carbon-200">{execution.runtime_code_coverage.phases?.join(', ') || 'none'}</span>
+                                </div>
+                              </div>
+                              <p className="mt-1 text-[10px] text-carbon-500">
+                                {execution.runtime_code_coverage.interpretation || 'Executed region observed; input influence still requires confirmation.'}
+                              </p>
+                            </div>
+                          )}
+
+                          {execution.runtime_lineage && (
+                            <div>
+                              <div className="mb-1 flex items-center justify-between gap-2">
+                                <span className="text-[10px] text-carbon-400 uppercase font-bold">Runtime Causal Lineage</span>
+                                <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                                  (execution.runtime_lineage.summary?.value_influence ?? 0) > 0
+                                    ? 'bg-fuchsia-500/15 text-fuchsia-300'
+                                    : (execution.runtime_lineage.summary?.causal_only ?? 0) > 0
+                                    ? 'bg-sky-500/15 text-sky-300'
+                                    : 'bg-carbon-700/50 text-carbon-300'
+                                }`}>
+                                  {(execution.runtime_lineage.summary?.value_influence ?? 0) > 0
+                                    ? 'A/A/B priority signal'
+                                    : (execution.runtime_lineage.summary?.causal_only ?? 0) > 0
+                                    ? 'Causal order only'
+                                    : 'No lineage'}
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-3 gap-2 rounded-lg border border-carbon-700/70 bg-carbon-900/90 p-2">
+                                <div>
+                                  <span className="block text-[9px] font-bold uppercase text-carbon-500">Candidates</span>
+                                  <span className="text-[11px] text-carbon-200">{execution.runtime_lineage.summary?.candidates ?? 0}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[9px] font-bold uppercase text-carbon-500">Causal only</span>
+                                  <span className="text-[11px] text-carbon-200">{execution.runtime_lineage.summary?.causal_only ?? 0}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[9px] font-bold uppercase text-carbon-500">A/A/B signal</span>
+                                  <span className="text-[11px] text-carbon-200">{execution.runtime_lineage.summary?.value_influence ?? 0}</span>
+                                </div>
+                              </div>
+                              <p className="mt-1 text-[10px] text-carbon-500">
+                                {(execution.runtime_lineage.summary?.value_influence ?? 0) > 0
+                                  ? 'Fixed A/A/B order is sequence-confounded: time or server state can explain the B difference. This ranks follow-up work; only the execution oracle confirms XSS.'
+                                  : execution.runtime_lineage.interpretation || 'Causal lineage ranks follow-up evidence; only the execution oracle confirms XSS.'}
+                              </p>
+                            </div>
+                          )}
+
+                          {execution.dom_marker_differential && (
+                            <div>
+                              <div className="mb-1 flex items-center justify-between gap-2">
+                                <span className="text-[10px] text-carbon-400 uppercase font-bold">DOM Marker Differential</span>
+                                <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                                  execution.dom_marker_differential.differential_available
+                                    ? 'bg-violet-500/15 text-violet-300'
+                                    : 'bg-amber-500/15 text-amber-300'
+                                }`}>
+                                  {execution.dom_marker_differential.differential_available ? 'Before / after' : 'Single snapshot'}
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-3 gap-2 rounded-lg border border-carbon-700/70 bg-carbon-900/90 p-2">
+                                <div>
+                                  <span className="block text-[9px] font-bold uppercase text-carbon-500">Baseline</span>
+                                  <span className="text-[11px] text-carbon-200">{execution.dom_marker_differential.summary?.baseline_marker_sites ?? 0}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[9px] font-bold uppercase text-carbon-500">After</span>
+                                  <span className="text-[11px] text-carbon-200">{execution.dom_marker_differential.summary?.after_marker_sites ?? 0}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[9px] font-bold uppercase text-carbon-500">New sites</span>
+                                  <span className="text-[11px] text-carbon-200">{execution.dom_marker_differential.summary?.new_marker_sites ?? 0}</span>
+                                </div>
+                              </div>
+                              <p className="mt-1 text-[10px] text-carbon-500">
+                                {execution.dom_marker_differential.interpretation || 'Marker placement observed; execution still requires separate evidence.'}
+                              </p>
+                            </div>
+                          )}
+
+                          {/* Taint flows */}
+                          {execution.taint_flows && execution.taint_flows.length > 0 && (
+                            <div>
+                              <span className="text-[10px] text-carbon-400 uppercase font-bold block mb-1">DOM Taint Trace</span>
+                              <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 p-2 text-[11px] text-amber-200 space-y-1">
+                                {execution.taint_flows.map((t, idx) => (
+                                  <div key={idx} className="flex items-start gap-1">
+                                    <span className="text-amber-400 font-bold">⚡</span>
+                                    <span>{t.text}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
                 {latestResults.length === 0 && (
                   <div className="px-6 py-10 text-center text-sm text-carbon-400">
                     Results will appear after browser execution starts.

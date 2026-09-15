@@ -1,0 +1,38 @@
+# Copy to collector.toml and edit the scope before use.
+[scope]
+authorized_use = true
+allow = ["https://example.com/"]
+deny = ["https://example.com/admin/private/*"]
+allow_private_networks = true
+
+[crawl]
+profile = "standard"
+max_depth = 2
+max_pages = 500
+concurrency = 8
+per_host_concurrency = 2
+requests_per_second = 2.0
+timeout_seconds = 15.0
+max_response_bytes = 2000000
+retries = 2
+respect_robots = true
+follow_redirects = true
+user_agent = "XSSBOSS-Collector/1.3 (+authorized-security-inventory)"
+
+[storage]
+database = "data/collector.db"
+evidence_dir = "data/evidence"
+store_response_bodies = true
+compress_evidence = true
+
+[privacy]
+redact_headers = ["authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key"]
+redact_parameters = ["password", "passwd", "secret", "token", "api_key", "apikey", "access_token", "refresh_token", "session", "jwt", "credit_card", "ssn"]
+retain_query_values = false
+retain_request_bodies = false
+
+[analysis]
+javascript_enabled = true
+analyze_inline_scripts = true
+analyze_source_maps = true
+max_source_map_sources = 10000

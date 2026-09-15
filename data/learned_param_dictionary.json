@@ -1,0 +1,1074 @@
+{
+  "version": "1.0",
+  "updated_at": "2026-09-10T06:01:39.569431+00:00",
+  "total_count": 97,
+  "items": {
+    "url": {
+      "param_name": "url",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "redirect": {
+      "param_name": "redirect",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "redirect_uri": {
+      "param_name": "redirect_uri",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "redirecturl": {
+      "param_name": "redirecturl",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "redirect_url": {
+      "param_name": "redirect_url",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "originurl": {
+      "param_name": "originurl",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "origin_url": {
+      "param_name": "origin_url",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "targeturl": {
+      "param_name": "targeturl",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "target_url": {
+      "param_name": "target_url",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "dest": {
+      "param_name": "dest",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "destination": {
+      "param_name": "destination",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "goto": {
+      "param_name": "goto",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "return": {
+      "param_name": "return",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "returnurl": {
+      "param_name": "returnurl",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "return_url": {
+      "param_name": "return_url",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "r": {
+      "param_name": "r",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "next": {
+      "param_name": "next",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "continue": {
+      "param_name": "continue",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "continueurl": {
+      "param_name": "continueurl",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "relaystate": {
+      "param_name": "relaystate",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "forward": {
+      "param_name": "forward",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "referrer": {
+      "param_name": "referrer",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "backurl": {
+      "param_name": "backurl",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "checkouturl": {
+      "param_name": "checkouturl",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "callbackurl": {
+      "param_name": "callbackurl",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "callback_url": {
+      "param_name": "callback_url",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "auth_redirect": {
+      "param_name": "auth_redirect",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "login_redirect": {
+      "param_name": "login_redirect",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "state": {
+      "param_name": "state",
+      "category": "dom_state",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "target": {
+      "param_name": "target",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "seocallbackkey": {
+      "param_name": "seoCallbackKey",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "urldynamic": {
+      "param_name": "urlDynamic",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "cartredirectpayload": {
+      "param_name": "cartRedirectPayload",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "viewurl": {
+      "param_name": "viewUrl",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "out": {
+      "param_name": "out",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "link": {
+      "param_name": "link",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "to": {
+      "param_name": "to",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "nexturl": {
+      "param_name": "nextUrl",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "successurl": {
+      "param_name": "successUrl",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "failurl": {
+      "param_name": "failUrl",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "loginurl": {
+      "param_name": "loginUrl",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "oauthredirect": {
+      "param_name": "oauthRedirect",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "forwardurl": {
+      "param_name": "forwardUrl",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "q": {
+      "param_name": "q",
+      "category": "search_query",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "query": {
+      "param_name": "query",
+      "category": "search_query",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "search": {
+      "param_name": "search",
+      "category": "search_query",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "term": {
+      "param_name": "term",
+      "category": "search_query",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "keyword": {
+      "param_name": "keyword",
+      "category": "search_query",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "s": {
+      "param_name": "s",
+      "category": "search_query",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "filterviewid": {
+      "param_name": "filterViewID",
+      "category": "search_query",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "keyworddynamic": {
+      "param_name": "keywordDynamic",
+      "category": "search_query",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "find": {
+      "param_name": "find",
+      "category": "search_query",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "lookup": {
+      "param_name": "lookup",
+      "category": "search_query",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "key": {
+      "param_name": "key",
+      "category": "search_query",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "text": {
+      "param_name": "text",
+      "category": "search_query",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "querytext": {
+      "param_name": "queryText",
+      "category": "search_query",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "search_term": {
+      "param_name": "search_term",
+      "category": "search_query",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "callback": {
+      "param_name": "callback",
+      "category": "jsonp_callback",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "cb": {
+      "param_name": "cb",
+      "category": "jsonp_callback",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "jsonp": {
+      "param_name": "jsonp",
+      "category": "jsonp_callback",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "call": {
+      "param_name": "call",
+      "category": "jsonp_callback",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "function": {
+      "param_name": "function",
+      "category": "jsonp_callback",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "handler": {
+      "param_name": "handler",
+      "category": "jsonp_callback",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "jsonpcallback": {
+      "param_name": "jsonpCallback",
+      "category": "jsonp_callback",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "output": {
+      "param_name": "output",
+      "category": "jsonp_callback",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "debug": {
+      "param_name": "debug",
+      "category": "debug_privileged",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "admin": {
+      "param_name": "admin",
+      "category": "debug_privileged",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "test": {
+      "param_name": "test",
+      "category": "debug_privileged",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "dev": {
+      "param_name": "dev",
+      "category": "debug_privileged",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "preview": {
+      "param_name": "preview",
+      "category": "debug_privileged",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "enable": {
+      "param_name": "enable",
+      "category": "debug_privileged",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "mode": {
+      "param_name": "mode",
+      "category": "debug_privileged",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "view": {
+      "param_name": "view",
+      "category": "debug_privileged",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "advancedhidden": {
+      "param_name": "advancedHidden",
+      "category": "debug_privileged",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "advancedquick": {
+      "param_name": "advancedQuick",
+      "category": "debug_privileged",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "internal": {
+      "param_name": "internal",
+      "category": "debug_privileged",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "draft": {
+      "param_name": "draft",
+      "category": "debug_privileged",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "dryrun": {
+      "param_name": "dryRun",
+      "category": "debug_privileged",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "trace": {
+      "param_name": "trace",
+      "category": "debug_privileged",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "verbose": {
+      "param_name": "verbose",
+      "category": "debug_privileged",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "data": {
+      "param_name": "data",
+      "category": "dom_state",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "payload": {
+      "param_name": "payload",
+      "category": "dom_state",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "hash": {
+      "param_name": "hash",
+      "category": "dom_state",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "fragment": {
+      "param_name": "fragment",
+      "category": "dom_state",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "dom": {
+      "param_name": "dom",
+      "category": "dom_state",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "template": {
+      "param_name": "template",
+      "category": "dom_state",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "docpageid": {
+      "param_name": "docPageID",
+      "category": "dom_state",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "smart_page_id": {
+      "param_name": "smart_page_id",
+      "category": "dom_state",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "custom_fields": {
+      "param_name": "custom_fields",
+      "category": "dom_state",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "workspaceid": {
+      "param_name": "workspaceID",
+      "category": "dom_state",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "projectid": {
+      "param_name": "projectID",
+      "category": "dom_state",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "system_defaults"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T00:17:39.319737+00:00",
+      "updated_at": "2026-08-29T00:17:39.319737+00:00"
+    },
+    "custom_partner_redirect": {
+      "param_name": "custom_partner_redirect",
+      "category": "redirect",
+      "occurrence_count": 1,
+      "discovered_from": [
+        "PartnerProgram"
+      ],
+      "is_custom": true,
+      "created_at": "2026-08-29T00:17:39.321826+00:00",
+      "updated_at": "2026-08-29T00:17:39.321826+00:00"
+    },
+    "get": {
+      "param_name": "get",
+      "category": "general_parameter",
+      "occurrence_count": 48,
+      "discovered_from": [
+        "Recon Engine"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T11:54:09.086680+00:00",
+      "updated_at": "2026-09-10T06:01:39.565433+00:00"
+    },
+    "myparam": {
+      "param_name": "myparam",
+      "category": "general_parameter",
+      "occurrence_count": 48,
+      "discovered_from": [
+        "Recon Engine"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T11:54:09.088681+00:00",
+      "updated_at": "2026-09-10T06:01:39.568433+00:00"
+    },
+    "testparam": {
+      "param_name": "testparam",
+      "category": "debug_privileged",
+      "occurrence_count": 48,
+      "discovered_from": [
+        "Recon Engine"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T11:54:09.091680+00:00",
+      "updated_at": "2026-09-10T06:01:39.566431+00:00"
+    },
+    "jsquery": {
+      "param_name": "jsquery",
+      "category": "search_query",
+      "occurrence_count": 48,
+      "discovered_from": [
+        "Recon Engine"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T11:54:09.114681+00:00",
+      "updated_at": "2026-09-10T06:01:39.569431+00:00"
+    },
+    "pci": {
+      "param_name": "pci",
+      "category": "general_parameter",
+      "occurrence_count": 2,
+      "discovered_from": [
+        "Marriott Bug Bounty Program"
+      ],
+      "is_custom": false,
+      "created_at": "2026-08-29T16:09:31.199946+00:00",
+      "updated_at": "2026-08-29T16:10:58.511206+00:00"
+    }
+  }
+}

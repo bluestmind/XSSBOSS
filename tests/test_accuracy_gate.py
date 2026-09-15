@@ -41,7 +41,12 @@ def test_cors_auditor_suppresses_preflight_only_false_positives():
     db = MagicMock()
 
     # Preflight returns ACAO + ACAC, but data POST returns 401 with CORS policy violation
-    with patch("httpx.Client.request") as mock_req:
+    # This is a response-classification unit test. Do not let an operator's
+    # optional proxy profile affect HTTP client construction (for example, a
+    # SOCKS proxy when the optional socksio dependency is not installed).
+    with patch(
+        "backend_api.utils.stealth.get_http_proxy_kwargs", return_value={}
+    ), patch("httpx.Client.request") as mock_req:
         options_resp = MagicMock(
             status_code=200,
             headers={
@@ -59,4 +64,3 @@ def test_cors_auditor_suppresses_preflight_only_false_positives():
 
         res = CorsAuditor._probe_endpoint(ep)
         assert res is None, "Expected preflight-only CORS reflection to be suppressed as false positive"
-

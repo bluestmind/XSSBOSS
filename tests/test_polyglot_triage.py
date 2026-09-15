@@ -9,12 +9,24 @@ class TestPolyglotTriage(unittest.TestCase):
     def test_polyglot_payload_rendering(self):
         """Polyglot payload must render the oracle token and custom callback name."""
         token = "TRIAGE_TOKEN_123"
-        payload = PolyglotTriageEngine.get_triage_payload(token=token, callback_name="__ORACLE__")
+        payload = PolyglotTriageEngine.get_triage_payload(token=token, callback_name="__ORACLE__", variant=0)
 
         self.assertIn(token, payload)
         self.assertIn("__ORACLE__", payload)
-        # Must contain HTML, attribute quotes, script, and SVG breakouts
-        self.assertTrue(any(marker in payload for marker in ["<svg", "<script", "onfocus", "-->"]))
+        # Must contain Somdev universal polyglot indicators (RCDATA closures, SVG, template breakout)
+        self.assertIn("</template></noembed></noscript></style></title></textarea></script>", payload)
+        self.assertIn("&lt;svg onload=", payload)
+        self.assertIn("javascript:", payload)
+
+    def test_all_polyglot_variants_render_properly(self):
+        """Verify all registered polyglot triage variants render cleanly with oracle tokens."""
+        token = "CANARY_ALL_VARIANTS"
+        for i in range(len(PolyglotTriageEngine.TRIAGE_POLYGLOTS)):
+            rendered = PolyglotTriageEngine.get_triage_payload(token=token, callback_name="__XSS__", variant=i)
+            self.assertIn(token, rendered)
+            self.assertIn("__XSS__", rendered)
+            self.assertNotIn("{TOKEN}", rendered)
+            self.assertNotIn("{CALLBACK}", rendered)
 
     def test_triage_immediate_execution(self):
         """When oracle executes on Request #1, triage marks vulnerability confirmed and halts further fuzzing."""
@@ -60,6 +72,25 @@ class TestPolyglotTriage(unittest.TestCase):
         self.assertTrue(result.should_continue_fuzzing)
         self.assertIn("ATTR_QUOTED", result.candidate_contexts)
         self.assertIn("JS_STRING_LITERAL", result.candidate_contexts)
+
+    def test_is_triage_payload_detects_all_variants(self):
+        """is_triage_payload recognises every rendered variant, token-independent, and rejects noise."""
+        for i in range(len(PolyglotTriageEngine.TRIAGE_POLYGLOTS)):
+            rendered = PolyglotTriageEngine.get_triage_payload(token="ABC123", variant=i)
+            self.assertTrue(PolyglotTriageEngine.is_triage_payload(rendered), f"variant {i} not detected")
+        # Ordinary single-context grammar payloads must not be mistaken for the triage probe.
+        self.assertFalse(PolyglotTriageEngine.is_triage_payload("<img src=x onerror=__XSS__('ABC')>"))
+        self.assertFalse(PolyglotTriageEngine.is_triage_payload("\"><svg onload=alert(1)>"))
+        self.assertFalse(PolyglotTriageEngine.is_triage_payload(""))
+        self.assertFalse(PolyglotTriageEngine.is_triage_payload(None))
+
+    def test_residue_detects_event_handler_context(self):
+        """Token surviving inside an on* handler attribute is reported as EVENT_HANDLER_ATTR."""
+        token = "EVT_TOKEN"
+        html = f'<div onmouseover="doThing(\'{token}\')">x</div>'
+        result = PolyglotTriageEngine.evaluate_triage(dom_snapshot=html, token=token, oracle_executed=False)
+        self.assertTrue(result.reflected)
+        self.assertIn("EVENT_HANDLER_ATTR", result.candidate_contexts)
 
     def test_strategy_profile_polyglot_first(self):
         """Verify Strategy.POLYGLOT_FIRST is properly registered in StrategyProfile."""

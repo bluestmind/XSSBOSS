@@ -21,13 +21,15 @@ class PayloadGenerator:
     # Context type to grammar file mapping
     CONTEXT_GRAMMAR_MAP = {
         'HTML_TEXT': 'html_text.json',
+        'HTML_COMMENT': 'html_comment.json',
+        'HTML_RCDATA': 'html_rcdata.json',
         'ATTR_QUOTED': 'attr_quoted.json',
         'ATTR_UNQUOTED': 'attr_unquoted.json',
         'EVENT_HANDLER_ATTR': 'event_handler.json',
         'JS_STRING_LITERAL': 'js_string.json',
         'JS_IDENTIFIER': 'js_string.json',
-        'JS_TEMPLATE_LITERAL': 'js_string.json',
-        'TEMPLATE_LITERAL': 'js_string.json',
+        'JS_TEMPLATE_LITERAL': 'js_template_literal.json',
+        'TEMPLATE_LITERAL': 'js_template_literal.json',
         'JSON_VALUE': 'json_value.json',
         'URL_FRAGMENT': 'url_context.json',
         'URL_QUERY': 'url_context.json',
@@ -340,7 +342,7 @@ class PayloadGenerator:
             payloads = list(dict.fromkeys(base_payloads + payloads + mutated_payloads))
         
         # AST Pre-Filtering: Filter out invalid JavaScript syntax to prevent CPU thrashing in headless browsers
-        payloads = self._filter_invalid_js_syntax(payloads)
+        payloads = self._filter_invalid_js_syntax(payloads, context_type=context_type)
         
         # Limit payloads
         if len(payloads) > max_count:
@@ -348,8 +350,17 @@ class PayloadGenerator:
         
         return payloads
 
-    def _filter_invalid_js_syntax(self, payloads: List[str]) -> List[str]:
+    def _filter_invalid_js_syntax(
+        self,
+        payloads: List[str],
+        context_type: Optional[str] = None,
+    ) -> List[str]:
         """Filter out payloads that contain invalid JavaScript syntax using Node.js."""
+        # These are deliberately expression fragments that are valid only
+        # inside an existing template literal. Parsing them as standalone JS
+        # incorrectly removes every context-correct `${...}` candidate.
+        if context_type in {"JS_TEMPLATE_LITERAL", "TEMPLATE_LITERAL"}:
+            return payloads
         # Auto-repair syntactic breaks before validating to preserve mutated candidates
         try:
             from fuzzer.genetic import GeneticBreeder

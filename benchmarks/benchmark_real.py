@@ -414,13 +414,14 @@ class RealBenchmarkRunner:
             elif route.method == "POST":
                 if route.needs_stored_step:
                     # Step 1: Submit payload to storage endpoint
+                    escaped_payload = payload.replace('`', '\\`')
                     if route.param_location == "json":
                         page.goto(self.base_url + "/")  # Navigate first for context
                         page.evaluate(f"""
                             fetch("{self.base_url + route.path}", {{
                                 method: "POST",
                                 headers: {{"Content-Type": "application/json"}},
-                                body: JSON.stringify({{ "{route.param_name}": `{payload.replace('`', '\\`')}` }})
+                                body: JSON.stringify({{ "{route.param_name}": `{escaped_payload}` }})
                             }});
                         """)
                     else:
@@ -429,7 +430,7 @@ class RealBenchmarkRunner:
                             fetch("{self.base_url + route.path}", {{
                                 method: "POST",
                                 headers: {{"Content-Type": "application/x-www-form-urlencoded"}},
-                                body: "{route.param_name}=" + encodeURIComponent(`{payload.replace('`', '\\`')}`)
+                                body: "{route.param_name}=" + encodeURIComponent(`{escaped_payload}`)
                             }});
                         """)
                     time.sleep(0.5)

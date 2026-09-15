@@ -275,7 +275,18 @@ class JSParser:
             if base_url and not url.startswith(('http://', 'https://')):
                 url = urljoin(base_url, url)
             
-            response = httpx.get(url, timeout=timeout, follow_redirects=True)
+            from backend_api.config import settings
+            from backend_api.utils.rate_limiter import rate_limited_call
+
+            response = rate_limited_call(
+                url,
+                lambda: httpx.get(
+                    url,
+                    timeout=timeout,
+                    follow_redirects=False,
+                    verify=not settings.ALLOW_INSECURE_TLS,
+                ),
+            )
             if response.status_code == 200:
                 content_type = response.headers.get('Content-Type', '').lower()
                 if 'javascript' in content_type or 'application/javascript' in content_type or url.endswith('.js'):

@@ -87,8 +87,7 @@ class TestDeepRecon(unittest.TestCase):
         self.assertIn("https://identity.porsche.com", subdomains)
         self.assertIn("https://finder.porsche.com", subdomains)
 
-    @patch("urllib.request.urlopen")
-    def test_graphql_introspection(self, mock_urlopen):
+    def test_graphql_introspection(self):
         """Verify GraphQL schema introspection extracts query and mutation fields."""
         gql_schema = {
             "data": {
@@ -102,13 +101,12 @@ class TestDeepRecon(unittest.TestCase):
                 }
             }
         }
-        mock_urlopen.return_value = MockResponse(json.dumps(gql_schema).encode("utf-8"))
-
         db = MagicMock()
         target = Target(id=1, base_url="https://example.com")
         db.query().filter().first.return_value = target
 
         recon = AdvancedRecon(db, 1)
+        recon._fetch_active_text = MagicMock(return_value=json.dumps(gql_schema))
         endpoints = recon.probe_graphql_schema("https://example.com")
 
         self.assertTrue(any("query={getCart}" in ep for ep in endpoints))

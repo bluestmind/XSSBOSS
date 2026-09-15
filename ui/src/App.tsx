@@ -16,6 +16,9 @@ const FindingPage = lazy(() => import('@/pages/FindingPage'));
 const LiveFuzzPage = lazy(() => import('@/pages/LiveFuzzPage'));
 const XssChecklistPage = lazy(() => import('@/pages/XssChecklistPage'));
 const ExperimentPage = lazy(() => import('@/pages/ExperimentPage'));
+const ProgramsPage = lazy(() => import('@/pages/ProgramsPage'));
+const ProgramDetailPage = lazy(() => import('@/pages/ProgramDetailPage'));
+const LogsPage = lazy(() => import('@/pages/LogsPage'));
 
 const RouteFallback = () => (
   <div className="flex min-h-[50vh] items-center justify-center" role="status" aria-live="polite">
@@ -64,6 +67,8 @@ function App() {
                 <Routes>
                   <Route path="/" element={<Navigate to="/scan" replace />} />
                   <Route path="/scan" element={<ScanPage />} />
+                  <Route path="/programs" element={<ProgramsPage />} />
+                  <Route path="/programs/:id" element={<ProgramDetailPage />} />
                   <Route path="/targets" element={<TargetsPage />} />
                   <Route path="/targets/:id" element={<TargetDetailPage />} />
                   <Route path="/endpoints/:id" element={<EndpointDetailPage />} />
@@ -72,6 +77,7 @@ function App() {
                   <Route path="/live" element={<LiveFuzzPage />} />
                   <Route path="/checklist" element={<XssChecklistPage />} />
                   <Route path="/experiments" element={<ExperimentPage />} />
+                  <Route path="/logs" element={<LogsPage />} />
                   <Route path="*" element={<Navigate to="/scan" replace />} />
                 </Routes>
               </Suspense>

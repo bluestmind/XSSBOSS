@@ -1,0 +1,4 @@
+# One URL per line. Replace these documentation examples with authorized targets.
+https://example.com/
+https://example.com/docs?section=security
+

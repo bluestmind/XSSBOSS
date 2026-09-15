@@ -5,6 +5,7 @@ from typing import List
 from backend_api.db.session import get_db
 from backend_api.schemas.target import TargetCreate, TargetUpdate, TargetResponse
 from backend_api.services.target_service import TargetService
+from backend_api.services.recon_dossier_service import ReconDossierService
 
 router = APIRouter(prefix="/targets", tags=["targets"])
 
@@ -13,7 +14,7 @@ router = APIRouter(prefix="/targets", tags=["targets"])
 def create_target(target: TargetCreate, db: Session = Depends(get_db)):
     """Create a new target."""
     try:
-        target_data = target.dict()
+        target_data = target.model_dump()
         db_target = TargetService.create_target(db, target_data)
         return db_target
     except Exception as e:
@@ -37,6 +38,20 @@ def get_target(target_id: int, db: Session = Depends(get_db)):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{target_id}/recon-dossier")
+def get_recon_dossier(target_id: int, db: Session = Depends(get_db)):
+    """Return the complete redacted recon inventory and cross-bug routing plan."""
+    try:
+        TargetService.get_target(db, target_id)
+        return ReconDossierService.build(db, target_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.put("/{target_id}", response_model=TargetResponse)

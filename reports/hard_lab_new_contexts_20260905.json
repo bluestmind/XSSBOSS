@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "manifest": "F:\\projects\\XSSBOSS\\tools\\hard_lab_manifest.json",
+  "cases": [
+    {
+      "slug": "post_message",
+      "detected": true,
+      "attempts": 3,
+      "last_test_case_id": 3,
+      "attempt_results": [
+        {
+          "test_case_id": 2,
+          "result": {
+            "test_case_id": 2,
+            "execution_id": 5,
+            "oracle_hit": true,
+            "status": "completed",
+            "error": null,
+            "duration_ms": 4373
+          }
+        },
+        {
+          "test_case_id": 1,
+          "result": {
+            "test_case_id": 1,
+            "execution_id": 6,
+            "oracle_hit": true,
+            "status": "completed",
+            "error": null,
+            "duration_ms": 4364
+          }
+        },
+        {
+          "test_case_id": 3,
+          "result": {
+            "test_case_id": 3,
+            "execution_id": 7,
+            "oracle_hit": false,
+            "status": "completed",
+            "error": null,
+            "duration_ms": 4338
+          }
+        }
+      ]
+    },
+    {
+      "slug": "post_message_origin_weak",
+      "detected": true,
+      "attempts": 3,
+      "last_test_case_id": 6,
+      "attempt_results": [
+        {
+          "test_case_id": 4,
+          "result": {
+            "test_case_id": 4,
+            "execution_id": 14,
+            "oracle_hit": true,
+            "status": "completed",
+            "error": null,
+            "duration_ms": 4311
+          }
+        },
+        {
+          "test_case_id": 5,
+          "result": {
+            "test_case_id": 5,
+            "execution_id": 15,
+            "oracle_hit": true,
+            "status": "completed",
+            "error": null,
+            "duration_ms": 4328
+          }
+        },
+        {
+          "test_case_id": 6,
+          "result": {
+            "test_case_id": 6,
+            "execution_id": 16,
+            "oracle_hit": false,
+            "status": "completed",
+            "error": null,
+            "duration_ms": 4306
+          }
+        }
+      ]
+    },
+    {
+      "slug": "dom_clobber",
+      "detected": false,
+      "attempts": 1,
+      "last_test_case_id": 7,
+      "attempt_results": [
+        {
+          "test_case_id": 7,
+          "result": {
+            "test_case_id": 7,
+            "execution_id": 19,
+            "oracle_hit": false,
+            "status": "completed",
+            "error": null,
+            "duration_ms": 4305
+          }
+        }
+      ]
+    },
+    {
+      "slug": "trusted_types_control",
+      "detected": false,
+      "attempts": 1,
+      "last_test_case_id": 8,
+      "attempt_results": [
+        {
+          "test_case_id": 8,
+          "result": {
+            "test_case_id": 8,
+            "execution_id": 22,
+            "oracle_hit": false,
+            "status": "completed",
+            "error": null,
+            "duration_ms": 4353
+          }
+        }
+      ]
+    }
+  ],
+  "metrics": {
+    "true_positive": 2,
+    "false_positive": 0,
+    "true_negative": 1,
+    "false_negative": 1,
+    "precision": 1.0,
+    "recall": 0.6666666666666666,
+    "f1": 0.8,
+    "complete": true,
+    "missing_cases": []
+  }
+}

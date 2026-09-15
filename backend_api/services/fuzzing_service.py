@@ -15,6 +15,10 @@ from backend_api.models.execution import Execution, OracleStatus
 from backend_api.services.experiment_service import ExperimentService
 from backend_api.utils.scope_guard import is_endpoint_in_scope
 from backend_api.utils.impact_scorer import ImpactScorer
+from backend_api.utils.log_serializer import (
+    parse_execution_logs,
+    sanitize_execution_logs,
+)
 from backend_api.services.result_service import ResultService
 from backend_api.utils.tokenizer import Tokenizer
 from backend_api.utils.logger import logger
@@ -24,6 +28,7 @@ import sys
 import os
 import gc
 import threading
+import time
 
 # Add workspace root to path for cross-module imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -31,7 +36,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from analysis_engine.detect_context import ContextDetectorEngine
 from analysis_engine.detect_filter import FilterDetectorEngine
 from fuzzer.generator import PayloadGenerator
-from fuzzer.strategy import Strategy
+from fuzzer.strategy import Strategy, StrategyProfile
 
 
 class FuzzingService:
@@ -43,12 +48,99 @@ class FuzzingService:
         self.context_detector = ContextDetectorEngine(db)
         self.filter_detector = FilterDetectorEngine(db)
         self.payload_generator = PayloadGenerator()
+
+    @staticmethod
+    def _payload_limit_for_strategy(strategy: Strategy) -> int:
+        """Honor the selected strategy budget within the global safety cap."""
+        profile = StrategyProfile.get_profile(strategy)
+        strategy_limit = max(
+            1,
+            int(profile.get("max_payloads_per_context", 1)),
+        )
+        return min(
+            max(1, settings.MAX_PAYLOADS_PER_CONTEXT),
+            strategy_limit,
+        )
+
+    @staticmethod
+    def _diversity_order(endpoints: List[Endpoint]) -> List[Endpoint]:
+        """Round-robin route families so one parameter-heavy path cannot monopolize a run."""
+        from urllib.parse import urlsplit
+
+        families: Dict[tuple[str, str, str], List[Endpoint]] = {}
+        for endpoint in endpoints:
+            parsed = urlsplit(str(endpoint.url_pattern or ""))
+            key = (
+                str(endpoint.method or "GET").upper(),
+                parsed.netloc.lower(),
+                parsed.path.rstrip("/") or "/",
+            )
+            families.setdefault(key, []).append(endpoint)
+
+        ordered: List[Endpoint] = []
+        offset = 0
+        while True:
+            added = False
+            for family in families.values():
+                if offset < len(family):
+                    ordered.append(family[offset])
+                    added = True
+            if not added:
+                return ordered
+            offset += 1
     
-    def run_experiment(self, experiment_id: int) -> Dict[str, Any]:
+    def run_experiment(self, experiment_id: int, progress_callback=None) -> Dict[str, Any]:
         """Run a complete fuzzing experiment."""
 
         from concurrent.futures import ThreadPoolExecutor, as_completed
         from backend_api.db.base import SessionLocal
+
+        def progress(
+            phase: str,
+            message: str,
+            *,
+            tool: str = "fuzzing orchestrator",
+            state: str = "working",
+            completed: Optional[int] = None,
+            total: Optional[int] = None,
+            overall_percent: Optional[float] = None,
+            detail: Optional[str] = None,
+            doing_status: Optional[str] = None,
+            micro_state: Optional[dict] = None,
+            river_stage: Optional[str] = None,
+        ) -> None:
+            logger.info("Scan progress [%s]: %s", phase, message)
+            try:
+                RunStateService.record_progress(
+                    self.db,
+                    experiment_id,
+                    phase=phase,
+                    tool=tool,
+                    message=message,
+                    state=state,
+                    completed=completed,
+                    total=total,
+                    overall_percent=overall_percent,
+                    detail=detail,
+                    doing_status=doing_status,
+                    micro_state=micro_state,
+                    river_stage=river_stage,
+                )
+            except Exception:
+                logger.debug("Could not persist scan progress", exc_info=True)
+            if progress_callback:
+                try:
+                    import inspect
+                    sig = inspect.signature(progress_callback)
+                    if len(sig.parameters) >= 3:
+                        progress_callback(phase, message, doing_status=doing_status, micro_state=micro_state, river_stage=river_stage)
+                    else:
+                        progress_callback(phase, message)
+                except Exception:
+                    try:
+                        progress_callback(phase, message)
+                    except Exception:
+                        logger.debug("Progress callback failed", exc_info=True)
         
         experiment = self.db.query(Experiment).filter(Experiment.id == experiment_id).first()
         if not experiment:
@@ -56,6 +148,14 @@ class FuzzingService:
         
         # Start or resume experiment status to RUNNING
         experiment = ExperimentService.start_experiment(self.db, experiment_id)
+        progress(
+            "preflight",
+            "Checking target reachability",
+            tool="HTTP preflight",
+            overall_percent=22,
+            doing_status=f"Verifying target reachability for {experiment.target.base_url}",
+            river_stage="springs",
+        )
 
         # Pre-scan reachability check
         try:
@@ -138,87 +238,176 @@ class FuzzingService:
                 f"Skipping {skipped_out_of_scope} endpoint(s) outside the target's configured scope"
             )
 
-        endpoints = in_scope_endpoints
+        endpoints = self._diversity_order(in_scope_endpoints)
         endpoint_ids = [ep.id for ep in endpoints]
+        recon_dossier = None
+        try:
+            from backend_api.services.recon_dossier_service import ReconDossierService
 
+            recon_dossier = ReconDossierService.build(
+                self.db,
+                experiment.target_id,
+                endpoint_ids=endpoint_ids,
+            )
+            updated_limits = dict(limits)
+            updated_limits["recon_dossier"] = {
+                "summary": recon_dossier["summary"],
+                "coverage_matrix": recon_dossier["coverage_matrix"],
+                "integrity_sha256": recon_dossier["integrity_sha256"],
+            }
+            experiment.limits = updated_limits
+            self.db.commit()
+            active_classes = sum(
+                1 for item in recon_dossier["coverage_matrix"].values() if item["kind"] in {"fuzz", "auditor"}
+            )
+            research_classes = sum(
+                1 for item in recon_dossier["coverage_matrix"].values() if item["kind"] == "research"
+            )
+            routed_candidates = sum(
+                item["candidate_count"] for item in recon_dossier["coverage_matrix"].values()
+            )
+            progress(
+                "recon-routing",
+                f"Mapped {routed_candidates} recon candidate(s) into {active_classes} active and {research_classes} research bug classes",
+                tool="cross-bug recon router",
+                overall_percent=24,
+                doing_status="Recon Intelligence: Building the reusable cross-bug coverage map",
+                detail="Candidate endpoints run first; all in-scope endpoints remain covered to avoid blind spots.",
+                river_stage="recon",
+            )
+        except Exception as dossier_error:
+            logger.warning("Could not build reusable recon dossier: %s", dossier_error)
+            progress(
+                "recon-routing",
+                "Cross-bug recon map could not be built; retaining full endpoint coverage",
+                tool="cross-bug recon router",
+                overall_percent=24,
+                doing_status="Recon Intelligence: Falling back to unranked endpoint coverage",
+                detail=str(dossier_error)[:500],
+                river_stage="recon",
+            )
+
+        def routed(bug_key: str):
+            if recon_dossier is None:
+                return endpoints
+            return ReconDossierService.prioritize_endpoints(endpoints, recon_dossier, bug_key)
+
+        progress(
+            "auditors",
+            f"Running nine focused HTTP auditors across {len(endpoint_ids)} endpoint(s)",
+            tool="auditor suite",
+            completed=0,
+            total=9,
+            overall_percent=25,
+            doing_status="Auditor Cascades: Initializing specialized security auditor suite",
+            river_stage="auditors",
+        )
+
+        progress("auditors", "Testing cross-origin trust behavior", tool="CORS auditor", completed=0, total=9, overall_percent=25, doing_status="Auditor Cascades: Testing CORS trust configurations", river_stage="auditors")
         try:
             from backend_api.services.auditors.cors import CorsAuditor
-            cors_findings = CorsAuditor.audit_endpoints(self.db, endpoints)
+            cors_findings = CorsAuditor.audit_endpoints(self.db, routed("cors"))
             if cors_findings:
                 self._tag_findings_for_experiment(cors_findings, experiment_id)
                 logger.info(f"CORS auditor created/updated {len(cors_findings)} finding(s).")
                 self._auto_forward_auditor_findings(cors_findings)
         except Exception as cors_err:
             logger.warning(f"CORS auditor failed: {cors_err}")
+        progress("auditors", "CORS audit finished", tool="CORS auditor", completed=1, total=9, overall_percent=27, doing_status="Auditor Cascades: CORS audit completed", river_stage="auditors")
 
+        progress("auditors", "Testing path traversal and local-file patterns", tool="path traversal auditor", completed=1, total=9, overall_percent=27, doing_status="Auditor Cascades: Testing path traversal and LFI patterns", river_stage="auditors")
         try:
             from backend_api.services.auditors.path_traversal import PathTraversalAuditor
-            lfi_findings = PathTraversalAuditor.audit_endpoints(self.db, endpoints)
+            lfi_findings = PathTraversalAuditor.audit_endpoints(self.db, routed("path_traversal"))
             if lfi_findings:
                 self._tag_findings_for_experiment(lfi_findings, experiment_id)
                 logger.info(f"Path traversal auditor created/updated {len(lfi_findings)} finding(s).")
                 self._auto_forward_auditor_findings(lfi_findings)
         except Exception as lfi_err:
             logger.warning(f"Path traversal auditor failed: {lfi_err}")
+        progress("auditors", "Path traversal audit finished", tool="path traversal auditor", completed=2, total=9, overall_percent=29, doing_status="Auditor Cascades: Path traversal audit completed", river_stage="auditors")
 
+        progress("auditors", "Testing error-based SQL injection signatures", tool="SQL injection auditor", completed=2, total=9, overall_percent=29, doing_status="Auditor Cascades: Testing SQL injection signatures", river_stage="auditors")
         try:
             from backend_api.services.auditors.sqli import ErrorBasedSqliAuditor
-            sqli_findings = ErrorBasedSqliAuditor.audit_endpoints(self.db, endpoints)
+            sqli_findings = ErrorBasedSqliAuditor.audit_endpoints(self.db, routed("sqli"))
             if sqli_findings:
                 self._tag_findings_for_experiment(sqli_findings, experiment_id)
                 logger.info(f"SQLi auditor created/updated {len(sqli_findings)} finding(s).")
                 self._auto_forward_auditor_findings(sqli_findings)
         except Exception as sqli_err:
             logger.warning(f"SQLi auditor failed: {sqli_err}")
+        progress("auditors", "SQL injection audit finished", tool="SQL injection auditor", completed=3, total=9, overall_percent=32, doing_status="Auditor Cascades: SQL injection audit completed", river_stage="auditors")
 
-
+        progress("auditors", "Sending controlled server-side request canaries", tool="SSRF canary auditor", completed=3, total=9, overall_percent=32, doing_status="Auditor Cascades: Sending SSRF canary probes", river_stage="auditors")
         try:
             from backend_api.services.auditors.ssrf import SsrfCanaryAuditor
-            ssrf_canaries = SsrfCanaryAuditor.audit_endpoints(self.db, experiment_id, endpoints)
+            ssrf_canaries = SsrfCanaryAuditor.audit_endpoints(self.db, experiment_id, routed("ssrf"))
             if ssrf_canaries:
                 logger.info(f"SSRF canary auditor sent {ssrf_canaries} collaborator probe(s).")
         except Exception as ssrf_err:
             logger.warning(f"SSRF canary auditor failed: {ssrf_err}")
+        progress("auditors", "SSRF audit finished", tool="SSRF canary auditor", completed=4, total=9, overall_percent=34, doing_status="Auditor Cascades: SSRF audit completed", river_stage="auditors")
         
+        progress("auditors", "Testing redirect-like parameters", tool="redirect auditor", completed=4, total=9, overall_percent=34, doing_status="Auditor Cascades: Testing open redirect candidates", river_stage="auditors")
         try:
             from backend_api.services.auditors.redirect import RedirectAuditor
-            redirect_findings = RedirectAuditor.audit_endpoints(self.db, endpoints)
+            redirect_findings = RedirectAuditor.audit_endpoints(self.db, routed("open_redirect"))
             if redirect_findings:
                 self._tag_findings_for_experiment(redirect_findings, experiment_id)
                 logger.info(f"Redirect auditor created/updated {len(redirect_findings)} finding(s).")
                 self._auto_forward_auditor_findings(redirect_findings)
         except Exception as redir_err:
             logger.warning(f"Redirect auditor failed: {redir_err}")
+        progress("auditors", "Redirect audit finished", tool="redirect auditor", completed=5, total=9, overall_percent=36, doing_status="Auditor Cascades: Open redirect audit completed", river_stage="auditors")
 
+        progress("auditors", "Testing response-header injection", tool="CRLF auditor", completed=5, total=9, overall_percent=36, doing_status="Auditor Cascades: Testing CRLF response-header injection", river_stage="auditors")
         try:
             from backend_api.services.auditors.crlf_injection import CRLFInjectionAuditor
-            crlf_findings = CRLFInjectionAuditor.audit_endpoints(self.db, endpoints)
+            crlf_findings = CRLFInjectionAuditor.audit_endpoints(self.db, routed("crlf"))
             if crlf_findings:
                 self._tag_findings_for_experiment(crlf_findings, experiment_id)
                 logger.info(f"CRLF auditor created/updated {len(crlf_findings)} finding(s).")
                 self._auto_forward_auditor_findings(crlf_findings)
         except Exception as crlf_err:
             logger.warning(f"CRLF auditor failed: {crlf_err}")
+        progress("auditors", "CRLF audit finished", tool="CRLF auditor", completed=6, total=9, overall_percent=38, doing_status="Auditor Cascades: CRLF audit completed", river_stage="auditors")
 
+        progress("auditors", "Testing parsed markup exfiltration candidates", tool="dangling markup auditor", completed=6, total=9, overall_percent=38, doing_status="Auditor Cascades: Testing dangling markup exfiltration", river_stage="auditors")
         try:
             from backend_api.services.auditors.dangling_markup import DanglingMarkupAuditor
-            dm_findings = DanglingMarkupAuditor.audit_endpoints(self.db, endpoints)
+            dm_findings = DanglingMarkupAuditor.audit_endpoints(self.db, routed("dangling_markup"))
             if dm_findings:
                 self._tag_findings_for_experiment(dm_findings, experiment_id)
                 logger.info(f"Dangling markup auditor created/updated {len(dm_findings)} finding(s).")
                 self._auto_forward_auditor_findings(dm_findings)
         except Exception as dm_err:
             logger.warning(f"Dangling markup auditor failed: {dm_err}")
+        progress("auditors", "Dangling markup audit finished", tool="dangling markup auditor", completed=7, total=9, overall_percent=41, doing_status="Auditor Cascades: Dangling markup audit completed", river_stage="auditors")
 
+        progress("auditors", "Testing cache deception behavior", tool="cache deception auditor", completed=7, total=9, overall_percent=41, doing_status="Auditor Cascades: Testing cache deception vulnerabilities", river_stage="auditors")
         try:
             from backend_api.services.auditors.cache_deception import CacheDeceptionAuditor
-            cd_findings = CacheDeceptionAuditor.audit_endpoints(self.db, endpoints)
+            cd_findings = CacheDeceptionAuditor.audit_endpoints(self.db, routed("cache_deception"))
             if cd_findings:
                 self._tag_findings_for_experiment(cd_findings, experiment_id)
                 logger.info(f"Cache deception auditor created/updated {len(cd_findings)} finding(s).")
                 self._auto_forward_auditor_findings(cd_findings)
         except Exception as cd_err:
             logger.warning(f"Cache deception auditor failed: {cd_err}")
+        progress("auditors", "Cache deception audit finished", tool="cache deception auditor", completed=8, total=9, overall_percent=43, doing_status="Auditor Cascades: Cache deception audit completed", river_stage="auditors")
+
+        try:
+            from backend_api.services.auditors.http_param import HttpParamPollutionAuditor
+            progress("auditors", "Testing duplicate-parameter interpretation", tool="HTTP parameter pollution auditor", completed=8, total=9, overall_percent=43, doing_status="Auditor Cascades: Testing HTTP parameter pollution", river_stage="auditors")
+            hpp_findings = HttpParamPollutionAuditor.audit_endpoints(self.db, routed("http_param"))
+            if hpp_findings:
+                self._tag_findings_for_experiment(hpp_findings, experiment_id)
+                logger.info(f"HTTP parameter pollution auditor created/updated {len(hpp_findings)} finding(s).")
+                self._auto_forward_auditor_findings(hpp_findings)
+        except Exception as hpp_err:
+            logger.warning(f"HTTP parameter pollution auditor failed: {hpp_err}")
+        progress("auditors", "HTTP parameter pollution audit finished", tool="HTTP parameter pollution auditor", completed=9, total=9, overall_percent=45, doing_status="Auditor Cascades: Specialized auditor suite finished", river_stage="auditors")
         
         test_cases_created = 0
         strategy_val = experiment.strategy.value
@@ -258,6 +447,10 @@ class FuzzingService:
         def process_endpoint(ep_id: int) -> int:
             """Target-profiling worker function running in a separate thread."""
             local_db = SessionLocal()
+            endpoint_started = time.monotonic()
+            endpoint_url = None
+            endpoint_param_count = 0
+            context_count = 0
             try:
                 # Refresh experiment status to check if it has been paused
                 exp = local_db.query(Experiment).filter(Experiment.id == experiment_id).first()
@@ -276,6 +469,34 @@ class FuzzingService:
                 if not ep or not is_endpoint_in_scope(ep):
                     logger.warning(f"Skipping out-of-scope endpoint {ep_id}")
                     return 0
+                endpoint_url = ep.url_pattern
+                discovered_params = local_db.query(Param).filter(Param.endpoint_id == ep_id).all()
+                from urllib.parse import parse_qs, urlsplit
+
+                query_names = set(parse_qs(urlsplit(endpoint_url).query, keep_blank_values=True))
+                params = [
+                    param for param in discovered_params
+                    if param.location != "query" or param.name in query_names or bool(param.burp_flagged)
+                ]
+                ignored_unbacked_params = len(discovered_params) - len(params)
+                endpoint_param_count = len(params)
+                from backend_api.services.log_service import LogService
+
+                LogService.info(
+                    "profiling.endpoint",
+                    f"Started profiling endpoint #{ep_id}",
+                    detail=endpoint_url,
+                    experiment_id=experiment_id,
+                    target_id=experiment.target_id,
+                    data={
+                        "event_type": "endpoint_profiling_started",
+                        "endpoint_id": ep_id,
+                        "url": endpoint_url,
+                        "method": ep.method,
+                        "parameter_count": endpoint_param_count,
+                        "ignored_unbacked_parameters": ignored_unbacked_params,
+                    },
+                )
                 
                 # Load detectors with thread-local db session
                 flt_detector = FilterDetectorEngine(local_db)
@@ -283,10 +504,33 @@ class FuzzingService:
                 # Step 1: Use already-stored contexts from DB (set by recon phase).
                 # Re-probing via HTTP misses JS-rendered sinks, and duplicates work.
                 # Only fall back to live probing when the DB has nothing yet.
-                contexts = local_db.query(Context).filter(Context.endpoint_id == ep_id).all()
+                valid_param_ids = [param.id for param in params]
+                contexts = (
+                    local_db.query(Context)
+                    .filter(Context.endpoint_id == ep_id)
+                    .filter(Context.param_id.in_(valid_param_ids))
+                    .all()
+                    if valid_param_ids else []
+                )
                 if not contexts:
                     ctx_detector = ContextDetectorEngine(local_db)
-                    contexts = ctx_detector.detect_contexts_for_endpoint(ep_id)
+                    contexts = []
+                    for candidate_param in params:
+                        contexts.extend(ctx_detector.detect_contexts_for_param(candidate_param.id))
+                context_count = len(contexts or [])
+                LogService.info(
+                    "profiling.endpoint",
+                    f"Context detection completed for endpoint #{ep_id}",
+                    detail=endpoint_url,
+                    experiment_id=experiment_id,
+                    target_id=experiment.target_id,
+                    data={
+                        "event_type": "endpoint_contexts_detected",
+                        "endpoint_id": ep_id,
+                        "url": endpoint_url,
+                        "context_count": context_count,
+                    },
+                )
                 if not contexts:
                     return 0
                 
@@ -307,7 +551,6 @@ class FuzzingService:
                 except Exception as err:
                     logger.error(f"Error profiling endpoint {ep_id}: {err}")
 
-                params = local_db.query(Param).filter(Param.endpoint_id == ep_id).all()
                 local_cases = 0
                 
                 # Step 4: Generate payloads and create test cases
@@ -351,7 +594,7 @@ class FuzzingService:
                                     ep_id, param.id, research_error,
                                 )
 
-                        max_p = max(1, settings.MAX_PAYLOADS_PER_CONTEXT)
+                        max_p = self._payload_limit_for_strategy(strategy)
                         payloads = self.payload_generator.generate_payloads(
                             context_type=context_type_enum,
                             token=token,
@@ -424,26 +667,97 @@ class FuzzingService:
                         break
                 
                 local_db.commit()
+                LogService.info(
+                    "profiling.endpoint",
+                    f"Finished profiling endpoint #{ep_id}",
+                    detail=endpoint_url,
+                    experiment_id=experiment_id,
+                    target_id=experiment.target_id,
+                    data={
+                        "event_type": "endpoint_profiling_complete",
+                        "endpoint_id": ep_id,
+                        "url": endpoint_url,
+                        "parameter_count": endpoint_param_count,
+                        "context_count": context_count,
+                        "test_cases_created": local_cases,
+                        "duration_ms": round((time.monotonic() - endpoint_started) * 1000),
+                    },
+                )
                 return local_cases
             except Exception as e:
                 logger.error(f"Error in process_endpoint {ep_id}: {e}", exc_info=True)
+                try:
+                    from backend_api.services.log_service import LogService
+
+                    LogService.error(
+                        "profiling.endpoint",
+                        f"Profiling failed for endpoint #{ep_id}",
+                        detail=str(e),
+                        experiment_id=experiment_id,
+                        target_id=experiment.target_id,
+                        data={
+                            "event_type": "endpoint_profiling_error",
+                            "endpoint_id": ep_id,
+                            "url": endpoint_url,
+                            "parameter_count": endpoint_param_count,
+                            "context_count": context_count,
+                            "duration_ms": round((time.monotonic() - endpoint_started) * 1000),
+                        },
+                    )
+                except Exception:
+                    logger.debug("Could not persist endpoint profiling failure", exc_info=True)
                 return 0
             finally:
                 local_db.close()
         
         # Run thread pool for concurrent context detection and filter profiling
         max_workers = min(settings.MAX_PROFILING_WORKERS, len(endpoint_ids)) if endpoint_ids else 1
+        endpoint_lookup = {endpoint.id: endpoint for endpoint in endpoints}
         logger.info(f"Starting concurrent profiling for {len(endpoint_ids)} endpoints with {max_workers} workers...")
         
+        profiled_count = 0
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {executor.submit(process_endpoint, ep_id): ep_id for ep_id in endpoint_ids}
             for future in as_completed(futures):
                 ep_id = futures[future]
+                created_count = 0
                 try:
                     created_count = future.result()
                     test_cases_created += created_count
                 except Exception as e:
                     logger.error(f"Thread execution error for endpoint {ep_id}: {e}", exc_info=True)
+                profiled_count += 1
+                completed_endpoint = endpoint_lookup.get(ep_id)
+                completed_url = completed_endpoint.url_pattern if completed_endpoint else None
+                progress(
+                    "profiling",
+                    f"Profiled endpoint {profiled_count} of {len(endpoint_ids)}",
+                    tool="context and filter profiler",
+                    completed=profiled_count,
+                    total=len(endpoint_ids),
+                    overall_percent=45 + (10 * profiled_count / max(1, len(endpoint_ids))),
+                    detail=f"Endpoint #{ep_id}: {completed_url or 'unknown URL'}; generated {created_count} case(s).",
+                    doing_status=f"Context Confluence: Profiling endpoint {profiled_count}/{len(endpoint_ids)}",
+                    micro_state={
+                        "action": "profile_endpoint_complete",
+                        "endpoint_id": ep_id,
+                        "endpoint": completed_url,
+                        "result": {"test_cases_created": created_count},
+                    },
+                    river_stage="contexts",
+                )
+
+        progress(
+            "generation",
+            f"Generated {test_cases_created} prioritized browser test case(s)",
+            tool="context-aware payload generator",
+            completed=test_cases_created,
+            total=max_total_cases,
+            overall_percent=55,
+            detail=f"Declared run cap: {max_total_cases}",
+            doing_status=f"Payload Generation: Created {test_cases_created} prioritized test cases",
+            river_stage="contexts",
+        )
         
         self.db.commit()
 
@@ -574,8 +888,11 @@ class FuzzingService:
                             sinks = []
                             for exec_obj in recent_executions:
                                 if exec_obj.logs:
-                                    from backend_api.utils.log_serializer import parse_execution_logs
-                                    logs_dict = parse_execution_logs(exec_obj.logs)
+                                    logs_dict = sanitize_execution_logs(
+                                        parse_execution_logs(exec_obj.logs),
+                                        test_case_id=exec_obj.test_case_id,
+                                        attempt_no=exec_obj.attempt_no,
+                                    )
                                     if logs_dict:
                                         errors.extend(logs_dict.get('errors', []))
                                         console.extend(logs_dict.get('console', []))
@@ -672,6 +989,28 @@ class FuzzingService:
                 batches = 0
                 while FuzzingService.queue_next_batch(self.db, experiment.id, max_active=1) > 0:
                     batches += 1
+                    finished_cases = self.db.query(TestCase.id).filter(
+                        TestCase.experiment_id == experiment.id,
+                        TestCase.status.in_([
+                            TestCaseStatus.COMPLETED,
+                            TestCaseStatus.FAILED,
+                            TestCaseStatus.CANCELLED,
+                            TestCaseStatus.SKIPPED,
+                        ]),
+                    ).count()
+                    total_cases = self.db.query(TestCase.id).filter(
+                        TestCase.experiment_id == experiment.id
+                    ).count()
+                    progress(
+                        "browser",
+                        f"Browser evidence updated: {finished_cases}/{total_cases} cases terminal",
+                        tool="Chromium execution oracle",
+                        completed=finished_cases,
+                        total=total_cases,
+                        overall_percent=55 + (35 * finished_cases / max(1, total_cases)),
+                        doing_status=f"Browser Whirlpool: Executing payload #{batches} ({finished_cases}/{total_cases} finished)",
+                        river_stage="browser",
+                    )
                     if batches % 10 == 0:
                         gc.collect()
                 # Sync experiment status and correlate findings
@@ -707,8 +1046,8 @@ class FuzzingService:
 
         created = 0
         payloads = [
-            "https://example.com/xssboss-open-redirect",
-            "//example.com/xssboss-open-redirect",
+            ("https://example.com/xssboss-open-redirect", "open_redirect_absolute_url"),
+            ("//example.com/xssboss-open-redirect", "open_redirect_scheme_relative"),
         ]
         params = (
             self.db.query(Param)
@@ -721,7 +1060,7 @@ class FuzzingService:
             if not is_redirect_candidate_param(param.name):
                 continue
 
-            for payload in payloads:
+            for payload, technique in payloads:
                 existing = (
                     self.db.query(TestCase)
                     .filter(TestCase.experiment_id == experiment_id)
@@ -743,6 +1082,13 @@ class FuzzingService:
                     token=Tokenizer.generate_token(),
                     priority=25,
                     status=TestCaseStatus.PENDING,
+                    technique=technique,
+                    research_metadata={
+                        "auditor": "open_redirect",
+                        "classification": "redirect_probe",
+                        "evidence_requirement": "browser_final_origin_changed_to_probe_origin",
+                        "generated_from": "redirect_like_parameter_name",
+                    },
                 )
                 self.db.add(test_case)
                 created += 1
@@ -857,6 +1203,7 @@ class FuzzingService:
         from backend_api.models.experiment import Experiment, ExperimentStatus
         from backend_api.models.test_case import TestCase, TestCaseStatus
         from backend_api.utils.scope_guard import is_endpoint_in_scope
+        from backend_api.services.log_service import LogService
         from browser_workers.worker import execute_test_case_task
 
         experiment = db.query(Experiment).filter(Experiment.id == experiment_id).first()
@@ -890,6 +1237,17 @@ class FuzzingService:
             for task in stuck_tasks:
                 task.status = TestCaseStatus.FAILED
             db.commit()
+            LogService.error(
+                "queue",
+                f"Marked {len(stuck_tasks)} stale browser case(s) failed",
+                experiment_id=experiment_id,
+                target_id=experiment.target_id,
+                data={
+                    "event_type": "stale_cases_failed",
+                    "test_case_ids": [task.id for task in stuck_tasks],
+                },
+                db=db,
+            )
 
         # Count active test cases
         active_count = db.query(TestCase).filter(
@@ -913,10 +1271,40 @@ class FuzzingService:
                 logger.warning(f"Failing out-of-scope test case {task.id} before queueing")
                 task.status = TestCaseStatus.FAILED
                 db.commit()
+                LogService.error(
+                    "queue",
+                    f"Rejected out-of-scope test case #{task.id}",
+                    experiment_id=experiment_id,
+                    target_id=experiment.target_id,
+                    data={
+                        "event_type": "queue_rejected_out_of_scope",
+                        "test_case_id": task.id,
+                        "endpoint": task.endpoint.url_pattern if task.endpoint else None,
+                    },
+                    db=db,
+                )
                 continue
 
             task.status = TestCaseStatus.QUEUED
             db.commit()
+            LogService.debug(
+                "queue",
+                f"Queued test case #{task.id}",
+                experiment_id=experiment_id,
+                target_id=experiment.target_id,
+                data={
+                    "event_type": "test_case_queued",
+                    "test_case_id": task.id,
+                    "priority": task.priority,
+                    "endpoint": task.endpoint.url_pattern if task.endpoint else None,
+                    "param": task.param.name if task.param else None,
+                    "param_location": task.param.location if task.param else None,
+                    "context": task.context.context_type if task.context else None,
+                    "technique": task.technique,
+                    "payload": task.payload,
+                },
+                db=db,
+            )
             execute_test_case_task.delay(task.id)
             queued_count += 1
             

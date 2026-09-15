@@ -1,5 +1,5 @@
 """Target schemas."""
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel, ConfigDict, field_serializer
 from typing import Optional, Dict, Any
 from datetime import datetime
 from backend_api.models.target import TargetStatus
@@ -40,6 +40,13 @@ class TargetResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    @field_serializer("auth_info")
+    def redact_auth_info(self, value: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if value is None:
+            return None
+        from backend_api.services.auth_session_service import AuthSessionService
+
+        return AuthSessionService.sanitize_public(value)
+
+    model_config = ConfigDict(from_attributes=True)
 

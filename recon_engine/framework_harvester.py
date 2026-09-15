@@ -10,7 +10,7 @@ import json
 import re
 import urllib.parse
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 
 try:
     import httpx
@@ -18,6 +18,7 @@ except ImportError:
     httpx = None
 
 from backend_api.utils.logger import logger
+from backend_api.config import settings
 
 
 @dataclass
@@ -39,9 +40,17 @@ class FrameworkHarvester:
     and Server-Side Rendered (SSR) meta-frameworks.
     """
 
-    def __init__(self, base_url: str, timeout: float = 2.0):
+    def __init__(
+        self,
+        base_url: str,
+        timeout: float = 2.0,
+        request_headers: Optional[Dict[str, str]] = None,
+        response_guard: Optional[Callable[[int, str, str], None]] = None,
+    ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.request_headers = dict(request_headers or {})
+        self.response_guard = response_guard
         self.discovered_routes: List[DiscoveredRoute] = []
 
     def harvest_all(self, html_content: Optional[str] = None, probe_remote: bool = True) -> List[DiscoveredRoute]:
@@ -372,12 +381,24 @@ class FrameworkHarvester:
         if not httpx or not url:
             return None
         try:
-            resp = httpx.get(
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                **self.request_headers,
+            }
+            from backend_api.utils.rate_limiter import rate_limited_call
+
+            resp = rate_limited_call(
                 url,
-                timeout=self.timeout,
-                follow_redirects=True,
-                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+                lambda: httpx.get(
+                    url,
+                    timeout=self.timeout,
+                    verify=not settings.ALLOW_INSECURE_TLS,
+                    follow_redirects=False,
+                    headers=headers,
+                ),
             )
+            if self.response_guard:
+                self.response_guard(resp.status_code, str(resp.url), resp.text)
             if resp.status_code == 200:
                 return resp.text
         except Exception:

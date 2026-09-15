@@ -26,11 +26,22 @@ import java.util.concurrent.Executors;
 import burp.api.montoya.ui.contextmenu.ContextMenuEvent;
 import burp.api.montoya.ui.contextmenu.ContextMenuItemsProvider;
 import burp.api.montoya.http.message.HttpRequestResponse;
+import burp.api.montoya.scanner.ScanCheck;
+import burp.api.montoya.scanner.audit.AuditResult;
+import burp.api.montoya.scanner.audit.insertionpoint.AuditInsertionPoint;
 import burp.api.montoya.scanner.audit.issues.AuditIssue;
 import burp.api.montoya.scanner.audit.issues.AuditIssueSeverity;
 import burp.api.montoya.scanner.audit.issues.AuditIssueConfidence;
+import burp.api.montoya.scanner.audit.issues.ConsolidationAction;
+import burp.api.montoya.websocket.WebSocketCreatedHandler;
+import burp.api.montoya.websocket.WebSocketCreated;
+import burp.api.montoya.websocket.WebSocketMessageHandler;
+import burp.api.montoya.websocket.TextMessage;
+import burp.api.montoya.websocket.BinaryMessage;
+import burp.api.montoya.websocket.TextWebSocketMessageAction;
+import burp.api.montoya.websocket.BinaryWebSocketMessageAction;
 
-public class XssBossExtension implements BurpExtension, HttpHandler, ContextMenuItemsProvider {
+public class XssBossExtension implements BurpExtension, HttpHandler, ContextMenuItemsProvider, ScanCheck {
 
     private MontoyaApi api;
     private Logging logging;
@@ -62,22 +73,55 @@ public class XssBossExtension implements BurpExtension, HttpHandler, ContextMenu
         api.extension().setName("XSS Boss Connector");
         logging.logToOutput("XSS Boss Connector initialized successfully.");
 
-        // Register HTTP handler to capture proxy traffic
+        // 1. Register HTTP handler to capture proxy traffic
         api.http().registerHttpHandler(this);
 
-        // Register custom settings tab in Burp UI
+        // 2. Register custom settings tab in Burp UI
         api.userInterface().registerSuiteTab("XSS Boss", createSettingsTab());
 
-        // Register Context Menu Provider to allow right-click direct fuzzing
+        // 3. Register Context Menu Provider to allow right-click direct fuzzing and sitemap export
         api.userInterface().registerContextMenuItemsProvider(this);
 
-        // Start background polling thread for Repeater queue
+        // 4. Register Native Burp Scan Check
+        api.scanner().registerScanCheck(this);
+
+        // 5. Register WebSocket Handler for real-time WebSocket frame auditing
+        try {
+            api.websockets().registerWebSocketCreatedHandler(webSocketCreated -> {
+                webSocketCreated.registerMessageHandler(new WebSocketMessageHandler() {
+                    @Override
+                    public TextWebSocketMessageAction handleTextMessage(TextMessage textMessage) {
+                        if (syncEnabled) {
+                            executor.submit(() -> {
+                                sendWebSocketFrameToXssBoss(
+                                    webSocketCreated.upgradeRequest().url(),
+                                    textMessage.direction().name(),
+                                    textMessage.payload(),
+                                    false
+                                );
+                            });
+                        }
+                        return TextWebSocketMessageAction.continueWith(textMessage);
+                    }
+
+                    @Override
+                    public BinaryWebSocketMessageAction handleBinaryMessage(BinaryMessage binaryMessage) {
+                        return BinaryWebSocketMessageAction.continueWith(binaryMessage);
+                    }
+                });
+            });
+            logging.logToOutput("Registered WebSocket frame interception for live DOM XSS auditing.");
+        } catch (Exception e) {
+            logging.logToError("WebSocket listener registration skipped: " + e.getMessage());
+        }
+
+        // 6. Start background polling thread for Repeater queue
         startRepeaterQueuePoller();
 
-        // Start background polling thread for Findings/Issues dashboard sync
+        // 7. Start background polling thread for Findings/Issues dashboard sync
         startFindingsQueuePoller();
 
-        // Initialize Collaborator client if supported by licensing/Burp version
+        // 8. Initialize Collaborator client if supported by licensing/Burp version
         try {
             this.collaboratorClient = api.collaborator().createClient();
             this.collaboratorPayload = collaboratorClient.generatePayload().toString();
@@ -140,9 +184,14 @@ public class XssBossExtension implements BurpExtension, HttpHandler, ContextMenu
         gbc.gridwidth = 2;
         panel.add(saveButton, gbc);
 
+        // Sync SiteMap Button
+        JButton syncSitemapButton = new JButton("Sync In-Scope SiteMap to XSS Boss");
+        gbc.gridy = 5;
+        panel.add(syncSitemapButton, gbc);
+
         // Status Label
         statusLabel = new JLabel("Status: Configured.");
-        gbc.gridy = 5;
+        gbc.gridy = 6;
         panel.add(statusLabel, gbc);
 
         saveButton.addActionListener(e -> {
@@ -151,11 +200,14 @@ public class XssBossExtension implements BurpExtension, HttpHandler, ContextMenu
                 targetId = Integer.parseInt(targetIdField.getText().trim());
                 syncEnabled = enabledCheckbox.isSelected();
                 statusLabel.setText("Saving settings...");
-                
                 testConnection();
             } catch (NumberFormatException ex) {
                 JOptionPane.showMessageDialog(panel, "Target ID must be a valid integer.", "Error", JOptionPane.ERROR_MESSAGE);
             }
+        });
+
+        syncSitemapButton.addActionListener(e -> {
+            syncEntireSiteMap();
         });
 
         return panel;
@@ -234,6 +286,85 @@ public class XssBossExtension implements BurpExtension, HttpHandler, ContextMenu
         } catch (Exception e) {
             logging.logToError("Error syncing request to XSS Boss: " + e.getMessage());
         }
+    }
+
+    private void sendWebSocketFrameToXssBoss(String wsUrl, String direction, String payload, boolean isBinary) {
+        try {
+            JsonObject json = new JsonObject();
+            json.addProperty("target_id", targetId);
+            json.addProperty("url", wsUrl);
+            json.addProperty("direction", direction);
+            json.addProperty("payload", payload);
+            json.addProperty("is_binary", isBinary);
+
+            java.net.http.HttpRequest apiRequest = java.net.http.HttpRequest.newBuilder()
+                    .uri(URI.create(xssBossUrl + "/api/v1/burp/websocket-push"))
+                    .header("Content-Type", "application/json")
+                    .POST(BodyPublishers.ofString(json.toString()))
+                    .build();
+
+            httpClient.send(apiRequest, BodyHandlers.ofString());
+        } catch (Exception e) {
+            logging.logToError("Error sending WebSocket frame to XSS Boss: " + e.getMessage());
+        }
+    }
+
+    public void syncEntireSiteMap() {
+        executor.submit(() -> {
+            try {
+                SwingUtilities.invokeLater(() -> statusLabel.setText("Status: Ingesting SiteMap..."));
+                java.util.List<HttpRequestResponse> siteMapItems = api.siteMap().requestResponses();
+                JsonArray itemsArray = new JsonArray();
+
+                int count = 0;
+                for (HttpRequestResponse item : siteMapItems) {
+                    if (item.request() != null && api.scope().isInScope(item.request().url())) {
+                        JsonObject obj = new JsonObject();
+                        obj.addProperty("method", item.request().method());
+                        obj.addProperty("url", item.request().url());
+                        
+                        JsonObject reqHeaders = new JsonObject();
+                        item.request().headers().forEach(h -> reqHeaders.addProperty(h.name(), h.value()));
+                        obj.add("headers", reqHeaders);
+                        obj.addProperty("body", item.request().bodyToString());
+                        
+                        if (item.response() != null) {
+                            obj.addProperty("status_code", item.response().statusCode());
+                            obj.addProperty("response_body", item.response().bodyToString());
+                        }
+                        itemsArray.add(obj);
+                        count++;
+                    }
+                }
+
+                if (count == 0) {
+                    SwingUtilities.invokeLater(() -> statusLabel.setText("Status: No in-scope items in SiteMap."));
+                    return;
+                }
+
+                JsonObject payload = new JsonObject();
+                payload.addProperty("target_id", targetId);
+                payload.add("items", itemsArray);
+
+                java.net.http.HttpRequest apiRequest = java.net.http.HttpRequest.newBuilder()
+                        .uri(URI.create(xssBossUrl + "/api/v1/burp/sitemap-bulk-push"))
+                        .header("Content-Type", "application/json")
+                        .POST(BodyPublishers.ofString(payload.toString()))
+                        .build();
+
+                java.net.http.HttpResponse<String> apiResponse = httpClient.send(apiRequest, BodyHandlers.ofString());
+                if (apiResponse.statusCode() == 200) {
+                    final int pushed = count;
+                    SwingUtilities.invokeLater(() -> statusLabel.setText("Status: Synced " + pushed + " in-scope SiteMap endpoints!"));
+                    logging.logToOutput("Successfully pushed " + count + " SiteMap items to XSS Boss.");
+                } else {
+                    SwingUtilities.invokeLater(() -> statusLabel.setText("Status: SiteMap push failed (" + apiResponse.statusCode() + ")"));
+                }
+            } catch (Exception e) {
+                SwingUtilities.invokeLater(() -> statusLabel.setText("Status: SiteMap sync error: " + e.getMessage()));
+                logging.logToError("Error syncing SiteMap to XSS Boss: " + e.getMessage());
+            }
+        });
     }
 
     private void startRepeaterQueuePoller() {
@@ -354,6 +485,37 @@ public class XssBossExtension implements BurpExtension, HttpHandler, ContextMenu
         } catch (Exception e) {
             logging.logToError("Error triggering direct fuzzing from Burp: " + e.getMessage());
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Native Burp ScanCheck Implementation
+    // -------------------------------------------------------------------------
+    @Override
+    public AuditResult activeAudit(HttpRequestResponse baseRequestResponse, AuditInsertionPoint auditInsertionPoint) {
+        if (syncEnabled && api.scope().isInScope(baseRequestResponse.request().url())) {
+            executor.submit(() -> {
+                sendToXssBoss(baseRequestResponse.request(), baseRequestResponse.response());
+            });
+        }
+        return AuditResult.auditResult(new java.util.ArrayList<>());
+    }
+
+    @Override
+    public AuditResult passiveAudit(HttpRequestResponse baseRequestResponse) {
+        if (syncEnabled && api.scope().isInScope(baseRequestResponse.request().url())) {
+            executor.submit(() -> {
+                sendToXssBoss(baseRequestResponse.request(), baseRequestResponse.response());
+            });
+        }
+        return AuditResult.auditResult(new java.util.ArrayList<>());
+    }
+
+    @Override
+    public ConsolidationAction consolidateIssues(AuditIssue newIssue, AuditIssue existingIssue) {
+        if (newIssue.name().equals(existingIssue.name()) && newIssue.baseUrl().equals(existingIssue.baseUrl())) {
+            return ConsolidationAction.KEEP_EXISTING;
+        }
+        return ConsolidationAction.KEEP_BOTH;
     }
 
     private void startFindingsQueuePoller() {

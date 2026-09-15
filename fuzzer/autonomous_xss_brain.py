@@ -75,10 +75,15 @@ class AutonomousXSSBrain:
         fws = [f.lower().strip() for f in (frameworks or []) if f]
         detected_sinks = [s.lower().strip() for s in (sinks or []) if s]
 
-        # Extract blocked characters and keywords
+        # Extract blocked characters and keywords. Filter profiles have used all
+        # three keys over time, so consume each one rather than silently ignoring
+        # constraints supplied by newer profiler and benchmark paths.
         blocked_chars: Set[str] = set()
-        if "blocked_characters" in filter_prof:
-            blocked_chars.update(filter_prof["blocked_characters"])
+        for key in ("blocked_characters", "blocked_chars", "blocked_tokens"):
+            values = filter_prof.get(key, []) or []
+            if isinstance(values, str):
+                values = [values]
+            blocked_chars.update(str(value) for value in values if value is not None)
         if "char_filter" in filter_prof:
             for char, is_blocked in filter_prof["char_filter"].items():
                 if is_blocked:
@@ -258,6 +263,25 @@ class AutonomousXSSBrain:
                         cvss_score=entry.cvss_score,
                     )
                 )
+
+        # Do not spend the bounded browser budget on payloads that still contain
+        # a known blocked token. Obfuscated/entity variants survive because their
+        # raw representation no longer contains the blocked value.
+        def respects_known_constraints(payload: str) -> bool:
+            payload_lower = payload.lower()
+            for constraint in blocked_chars:
+                if len(constraint) == 1:
+                    if constraint in payload:
+                        return False
+                elif constraint.lower() in payload_lower:
+                    return False
+            return True
+
+        decisions = [
+            decision
+            for decision in decisions
+            if respects_known_constraints(decision.payload)
+        ]
 
         # Deduplicate while preserving highest confidence
         unique_decisions: Dict[str, SynthesisDecision] = {}

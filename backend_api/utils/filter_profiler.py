@@ -2,7 +2,9 @@
 from typing import Dict, Any, List, Optional
 import httpx
 import re
+from backend_api.config import settings
 from backend_api.utils.logger import logger
+from backend_api.utils.rate_limiter import rate_limited_call, rate_limiter
 from backend_api.utils.request_builder import RequestBuilder
 
 
@@ -189,25 +191,33 @@ class FilterProfiler:
             # Build request
             if param_location == "query":
                 url = RequestBuilder.url_with_query_param(url, param_name, param_value)
-                response = httpx.request(
-                    method=method,
-                    url=url,
-                    headers=headers or {},
-                    cookies=cookies or {},
-                    timeout=timeout,
-                    follow_redirects=True
+                response = rate_limited_call(
+                    url,
+                    lambda: httpx.request(
+                        method=method,
+                        url=url,
+                        headers=headers or {},
+                        cookies=cookies or {},
+                        timeout=timeout,
+                        follow_redirects=True,
+                        verify=not settings.ALLOW_INSECURE_TLS,
+                    ),
                 )
             elif param_location == "body":
                 body = (base_body or {}).copy()
                 body[param_name] = param_value
-                response = httpx.request(
-                    method=method,
-                    url=url,
-                    headers=headers or {},
-                    cookies=cookies or {},
-                    data=body,
-                    timeout=timeout,
-                    follow_redirects=True
+                response = rate_limited_call(
+                    url,
+                    lambda: httpx.request(
+                        method=method,
+                        url=url,
+                        headers=headers or {},
+                        cookies=cookies or {},
+                        data=body,
+                        timeout=timeout,
+                        follow_redirects=True,
+                        verify=not settings.ALLOW_INSECURE_TLS,
+                    ),
                 )
             elif param_location == "json":
                 json_data = (base_json or {}).copy()
@@ -219,49 +229,65 @@ class FilterProfiler:
                         current[key] = {}
                     current = current[key]
                 current[keys[-1]] = param_value
-                response = httpx.request(
-                    method=method,
-                    url=url,
-                    headers=headers or {},
-                    cookies=cookies or {},
-                    json=json_data,
-                    timeout=timeout,
-                    follow_redirects=True
+                response = rate_limited_call(
+                    url,
+                    lambda: httpx.request(
+                        method=method,
+                        url=url,
+                        headers=headers or {},
+                        cookies=cookies or {},
+                        json=json_data,
+                        timeout=timeout,
+                        follow_redirects=True,
+                        verify=not settings.ALLOW_INSECURE_TLS,
+                    ),
                 )
             elif param_location == "header":
                 headers_with_payload = (headers or {}).copy()
                 headers_with_payload[param_name] = param_value
-                response = httpx.request(
-                    method=method,
-                    url=url,
-                    headers=headers_with_payload,
-                    cookies=cookies or {},
-                    timeout=timeout,
-                    follow_redirects=True
+                response = rate_limited_call(
+                    url,
+                    lambda: httpx.request(
+                        method=method,
+                        url=url,
+                        headers=headers_with_payload,
+                        cookies=cookies or {},
+                        timeout=timeout,
+                        follow_redirects=True,
+                        verify=not settings.ALLOW_INSECURE_TLS,
+                    ),
                 )
             elif param_location == "cookie":
                 cookies_with_payload = (cookies or {}).copy()
                 cookies_with_payload[param_name] = param_value
-                response = httpx.request(
-                    method=method,
-                    url=url,
-                    headers=headers or {},
-                    cookies=cookies_with_payload,
-                    timeout=timeout,
-                    follow_redirects=True
+                response = rate_limited_call(
+                    url,
+                    lambda: httpx.request(
+                        method=method,
+                        url=url,
+                        headers=headers or {},
+                        cookies=cookies_with_payload,
+                        timeout=timeout,
+                        follow_redirects=True,
+                        verify=not settings.ALLOW_INSECURE_TLS,
+                    ),
                 )
             elif param_location == "path":
                 if f"{{{param_name}}}" in url:
                     target_url = url.replace(f"{{{param_name}}}", param_value)
                 else:
                     target_url = url.rstrip('/') + '/' + param_value
-                response = httpx.request(
-                    method=method,
-                    url=target_url,
-                    headers=headers or {},
-                    cookies=cookies or {},
-                    timeout=timeout,
-                    follow_redirects=True
+                response = rate_limited_call(
+                    target_url,
+                    lambda: httpx.request(
+                        method=method,
+                        url=target_url,
+                        headers=headers or {},
+                        cookies=cookies or {},
+                        timeout=timeout,
+                        follow_redirects=True,
+                        verify=not settings.ALLOW_INSECURE_TLS,
+                    ),
                 )
             else:
                 raise ValueError(f"Unknown parameter location: {param_location}")
@@ -278,7 +304,9 @@ class FilterProfiler:
                     b_driver = webdriver.Chrome(options=opts)
                     try:
                         b_driver.set_page_load_timeout(timeout)
+                        rate_limiter.wait_for_slot(url)
                         b_driver.get(url)
+                        rate_limiter.report_success(url)
                         b_text = b_driver.page_source
                         if "access denied" not in (b_driver.title or "").lower():
                             class MockBrowserResponse:
@@ -686,7 +714,16 @@ class FilterProfiler:
         # As an improvement, we can perform a quick HEAD/GET request to collect the CSP header explicitly
         try:
             with httpx.Client(timeout=5) as client:
-                res = client.request(method=method, url=url, headers=headers, cookies=cookies, follow_redirects=True)
+                res = rate_limited_call(
+                    url,
+                    lambda: client.request(
+                        method=method,
+                        url=url,
+                        headers=headers,
+                        cookies=cookies,
+                        follow_redirects=True,
+                    ),
+                )
                 csp_header = res.headers.get('content-security-policy') or res.headers.get('content-security-policy-report-only')
                 if csp_header:
                     directives = CSPParser.parse_header(csp_header)

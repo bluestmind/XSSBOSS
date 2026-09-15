@@ -301,8 +301,8 @@ if __name__ == "__main__":
     print("=" * 70)
     print(f"Total Samples: {summary['total_samples']}")
     print(f"Correct:       {summary['correct']}")
-    print(f"Accuracy:      {summary['accuracy']}% (target: ≥{summary['target_accuracy']}%)")
-    print(f"Passed:        {'✅ YES' if summary['passed'] else '❌ NO'}")
+    print(f"Accuracy:      {summary['accuracy']}% (target: >={summary['target_accuracy']}%)")
+    print(f"Passed:        {'[PASS] YES' if summary['passed'] else '[FAIL] NO'}")
     print(f"Elapsed:       {summary['elapsed_seconds']:.2f}s")
     print("-" * 70)
 
@@ -315,5 +315,5 @@ if __name__ == "__main__":
     print("\nMisclassifications:")
     for r in summary["details"]:
         if not r["match"]:
-            print(f"  ❌ {r['sample']}: expected {r['expected_context']}, got {r['detected_context']}")
+            print(f"  [MISMATCH] {r['sample']}: expected {r['expected_context']}, got {r['detected_context']}")
             print(f"     {r['description']}")

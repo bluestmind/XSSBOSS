@@ -1,5 +1,8 @@
 .git
 .venv
+.env
+.env.*
+!.env.production.example
 **/__pycache__
 **/.pytest_cache
 ui/node_modules
@@ -7,5 +10,11 @@ ui/dist
 xss-lab
 screenshots
 reports
+evidence
+data
+scratch
+browser_profiles
+proxies.txt
 *.db
+*.db-*
 *.log

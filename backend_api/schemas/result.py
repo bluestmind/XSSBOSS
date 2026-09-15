@@ -1,5 +1,5 @@
 """Result schemas."""
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, Dict, Any
 from datetime import datetime
 from backend_api.models.finding import Severity, FindingStatus
@@ -25,11 +25,26 @@ class FindingResponse(BaseModel):
     poc_request: Optional[Dict[str, Any]]
     poc_html: Optional[str]
     screenshot_path: Optional[str]
+    target_name: Optional[str] = None
+    target_domain: Optional[str] = None
+    endpoint_url: Optional[str] = None
+    endpoint_method: Optional[str] = None
+    param_name: Optional[str] = None
+    param_location: Optional[str] = None
+    poc_url: Optional[str] = None
+    poc_source: Optional[str] = None
+    curl_command: Optional[str] = None
+    raw_http_request: Optional[str] = None
+    is_verified: bool = False
+    verification_state: str = "unverified"
+    verification_reason: Optional[str] = None
+    browser_replay_available: bool = False
+    context_type: Optional[str] = None
+    sink_type: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ExecutionResponse(BaseModel):
@@ -47,6 +62,5 @@ class ExecutionResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 

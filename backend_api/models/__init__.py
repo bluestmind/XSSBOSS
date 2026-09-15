@@ -28,6 +28,7 @@ from .research import (
     ResearchObservation,
     ResearchTechniqueStat,
 )
+from .log_event import LogEvent
 
 __all__ = [
     "Base",
@@ -67,4 +68,5 @@ __all__ = [
     "ResearchHypothesis",
     "ResearchObservation",
     "ResearchTechniqueStat",
+    "LogEvent",
 ]

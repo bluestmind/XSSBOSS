@@ -78,3 +78,36 @@ def test_extract_framework_routes():
     routes = crawler._extract_framework_routes()
     assert "https://marketplace.porsche.com/de/de_DE/cart/checkout" in routes
     assert "https://marketplace.porsche.com/vehicle/detail?id=123" in routes
+
+
+def test_crawler_groups_content_instances_but_preserves_feature_routes():
+    assert Crawler._route_template("https://example.com/blog/first-post") == "/blog/:item"
+    assert Crawler._route_template("https://example.com/blog/second-post") == "/blog/:item"
+    assert Crawler._route_template("https://example.com/jobs/search?q=security") == "/jobs/search?q="
+    assert Crawler._route_template("https://example.com/callback?next=/home") == "/callback?next="
+
+
+def test_crawler_canonical_key_deduplicates_values_not_parameter_surfaces():
+    first = Crawler._canonical_crawl_key("https://example.com/search?q=one&page=1")
+    second = Crawler._canonical_crawl_key("https://example.com/search?page=9&q=two")
+    distinct = Crawler._canonical_crawl_key("https://example.com/search?redirect=/home")
+    assert first == second
+    assert first != distinct
+
+
+def test_query_and_security_feature_routes_receive_higher_priority():
+    content_score, _ = Crawler._url_priority("https://example.com/blog/a-post", 1)
+    search_score, reasons = Crawler._url_priority("https://example.com/search?q=test", 1)
+    assert search_score > content_score
+    assert "query_parameters" in reasons
+    assert any(reason.startswith("feature_route:") for reason in reasons)
+    research_score, research_reasons = Crawler._url_priority(
+        "https://example.com/product-design-research", 1
+    )
+    assert research_score == content_score
+    assert not any(reason.startswith("feature_route:") for reason in research_reasons)
+    job_score, job_reasons = Crawler._url_priority(
+        "https://example.com/jobs/staff-search-engineer", 2
+    )
+    assert job_score < search_score
+    assert not any(reason.startswith("feature_route:search") for reason in job_reasons)

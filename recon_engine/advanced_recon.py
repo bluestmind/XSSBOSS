@@ -9,6 +9,7 @@ Features:
 - Deep client-side JavaScript parameter mining for modern SPAs (React, Next.js, Vue)
 """
 import concurrent.futures
+import contextvars
 import json
 import re
 import urllib.parse
@@ -21,6 +22,8 @@ from sqlalchemy.orm import Session
 from backend_api.models.endpoint import Endpoint
 from backend_api.models.param import Param
 from backend_api.models.target import Target
+from backend_api.config import settings
+from backend_api.services.auth_session_service import AuthSessionService
 from backend_api.services.recon_service import ReconService
 from backend_api.utils.logger import logger
 from backend_api.utils.scope_guard import is_url_in_scope
@@ -61,12 +64,118 @@ STATIC_MEDIA_EXTENSIONS = {
 class AdvancedRecon:
     """Orchestrates passive OSINT, active manifest scraping, and JS endpoint/parameter mining."""
 
-    def __init__(self, db: Session, target_id: int):
+    def __init__(
+        self,
+        db: Session,
+        target_id: int,
+        *,
+        auth_identity: Optional[str] = None,
+        session_auth: Optional[Dict[str, Any]] = None,
+    ):
         self.db = db
         self.target_id = target_id
         self.target = db.query(Target).filter(Target.id == target_id).first()
+        self.auth_identity = auth_identity
+        # A crawler-renewed session takes precedence over the original static material.
+        self.auth_info = session_auth or (self.target.auth_info if self.target else None)
         self.imported_endpoint_ids: Set[int] = set()
         self.discovered_urls: Set[str] = set()
+        self.interventions: List[Dict[str, Any]] = []
+
+    def _active_headers(self, url: str, defaults: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+        headers = dict(defaults or {})
+        if not self.auth_info or not self.target:
+            return headers
+        context = AuthSessionService.request_context_for_url(
+            self.auth_info,
+            url,
+            self.target.base_url,
+            self.auth_identity,
+        )
+        headers.update(context)
+        return headers
+
+    def _guard_active_response(self, status_code: int, final_url: str, body_text: str) -> None:
+        if self.interventions:
+            return
+        patterns = ()
+        identity = self.auth_identity
+        if self.auth_info:
+            try:
+                material = AuthSessionService.material(self.auth_info, self.auth_identity)
+                patterns = material.login_url_patterns
+                identity = material.label
+            except Exception:
+                pass
+        reason = AuthSessionService.response_intervention_reason(
+            status_code=status_code,
+            final_url=final_url,
+            body_text=body_text,
+            login_url_patterns=patterns,
+        )
+        if reason:
+            self.interventions.append({
+                "kind": "authentication_challenge",
+                "identity": identity,
+                "reason": reason,
+                "url": final_url,
+            })
+
+    def _fetch_active_text(
+        self,
+        url: str,
+        *,
+        timeout: float,
+        headers: Optional[Dict[str, str]] = None,
+        data: Optional[bytes] = None,
+        method: str = "GET",
+        max_bytes: int = 5 * 1024 * 1024,
+    ) -> str:
+        """Fetch one active target resource with origin-bound auth and bounded evidence."""
+        if self.interventions:
+            return ""
+        if self.target and not is_url_in_scope(self.target, url):
+            return ""
+        merged = self._active_headers(url, headers)
+        import httpx
+
+        from backend_api.utils.rate_limiter import rate_limiter
+        from backend_api.utils.stealth import get_http_proxy_kwargs
+
+        with httpx.Client(
+            timeout=timeout,
+            follow_redirects=False,
+            verify=not settings.ALLOW_INSECURE_TLS,
+            **get_http_proxy_kwargs(rotated=True),
+        ) as client:
+            rate_limiter.wait_for_slot(url)
+            response_reported = False
+            try:
+                with client.stream(
+                    method,
+                    url,
+                    content=data,
+                    headers=merged,
+                ) as response:
+                    rate_limiter.report_response(url, response)
+                    response_reported = True
+                    body = bytearray()
+                    for chunk in response.iter_bytes():
+                        if len(body) + len(chunk) > max_bytes:
+                            return ""
+                        body.extend(chunk)
+                    encoding = response.encoding or "utf-8"
+                    text = bytes(body).decode(encoding, errors="replace")
+                    self._guard_active_response(
+                        response.status_code,
+                        str(response.url),
+                        text,
+                    )
+                    return text if response.status_code == 200 else ""
+            except Exception:
+                if not response_reported:
+                    rate_limiter.report_error(url)
+                raise
 
     def _is_relevant_url(self, url: str) -> bool:
         """Filter out non-exploitable binary media files and enforce scope."""
@@ -294,25 +403,25 @@ class AdvancedRecon:
         # 1. Fetch robots.txt
         robots_url = urllib.parse.urljoin(base_url, "/robots.txt")
         try:
-            req = urllib.request.Request(robots_url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=4.0) as resp:
-                lines = resp.read().decode("utf-8", errors="ignore").splitlines()
-                for line in lines:
-                    line = line.strip()
-                    if line.lower().startswith(("disallow:", "allow:")):
-                        parts = line.split(":", 1)
-                        if len(parts) > 1:
-                            path = parts[1].strip()
-                            if path and not path.startswith("*"):
-                                full_url = urllib.parse.urljoin(base_url, path)
-                                if self._is_relevant_url(full_url):
-                                    discovered.add(full_url)
-                    elif line.lower().startswith("sitemap:"):
-                        parts = line.split(":", 1)
-                        if len(parts) > 1:
-                            s_url = parts[1].strip()
-                            if s_url.startswith("http"):
-                                sitemaps_to_crawl.add(s_url)
+            text = self._fetch_active_text(
+                robots_url, timeout=4.0, headers={"User-Agent": "Mozilla/5.0"}
+            )
+            for line in text.splitlines():
+                line = line.strip()
+                if line.lower().startswith(("disallow:", "allow:")):
+                    parts = line.split(":", 1)
+                    if len(parts) > 1:
+                        path = parts[1].strip()
+                        if path and not path.startswith("*"):
+                            full_url = urllib.parse.urljoin(base_url, path)
+                            if self._is_relevant_url(full_url):
+                                discovered.add(full_url)
+                elif line.lower().startswith("sitemap:"):
+                    parts = line.split(":", 1)
+                    if len(parts) > 1:
+                        s_url = parts[1].strip()
+                        if s_url.startswith("http"):
+                            sitemaps_to_crawl.add(s_url)
         except Exception:
             pass
 
@@ -322,16 +431,16 @@ class AdvancedRecon:
         # 2. Fetch sitemaps
         for sm_url in list(sitemaps_to_crawl)[:3]:
             try:
-                req = urllib.request.Request(sm_url, headers={"User-Agent": "Mozilla/5.0"})
-                with urllib.request.urlopen(req, timeout=4.0) as resp:
-                    xml_content = resp.read().decode("utf-8", errors="ignore")
-                    root = ET.fromstring(xml_content)
-                    # Extract all <loc> values
-                    for elem in root.iter():
-                        if elem.tag.endswith("loc") and elem.text:
-                            loc_url = elem.text.strip()
-                            if self._is_relevant_url(loc_url):
-                                discovered.add(loc_url)
+                xml_content = self._fetch_active_text(
+                    sm_url, timeout=4.0, headers={"User-Agent": "Mozilla/5.0"}
+                )
+                root = ET.fromstring(xml_content)
+                # Extract all <loc> values
+                for elem in root.iter():
+                    if elem.tag.endswith("loc") and elem.text:
+                        loc_url = elem.text.strip()
+                        if self._is_relevant_url(loc_url):
+                            discovered.add(loc_url)
             except Exception:
                 pass
 
@@ -347,7 +456,12 @@ class AdvancedRecon:
 
         # 1. Use FrameworkHarvester for Next.js, Nuxt 3, Remix, SvelteKit, Angular
         try:
-            harvester = FrameworkHarvester(base_url, timeout=6.0)
+            harvester = FrameworkHarvester(
+                base_url,
+                timeout=6.0,
+                request_headers=self._active_headers(base_url),
+                response_guard=self._guard_active_response,
+            )
             routes = harvester.harvest_all()
             for r in routes:
                 full_url = urllib.parse.urljoin(base_url, r.path)
@@ -360,9 +474,13 @@ class AdvancedRecon:
         endpoints = self.db.query(Endpoint).filter(Endpoint.target_id == self.target_id).all()
         js_endpoints = [ep.url_pattern for ep in endpoints if ep.url_pattern.split("?")[0].endswith(".js")]
 
-        sm_analyzer = SourceMapAnalyzer(timeout=4.0)
         for js_url in js_endpoints[:10]:
             try:
+                sm_analyzer = SourceMapAnalyzer(
+                    timeout=4.0,
+                    request_headers=self._active_headers(js_url),
+                    response_guard=self._guard_active_response,
+                )
                 findings = sm_analyzer.analyze_script_for_sourcemap(js_url)
                 for f in findings:
                     for ep_path in f.discovered_endpoints:
@@ -382,7 +500,12 @@ class AdvancedRecon:
         """Probe for Swagger, OpenAPI, and GraphQL endpoint declarations using APIDiscovery."""
         discovered: Set[str] = set()
         try:
-            api_disc = APIDiscovery(base_url, timeout=6.0)
+            api_disc = APIDiscovery(
+                base_url,
+                timeout=6.0,
+                request_headers=self._active_headers(base_url),
+                response_guard=self._guard_active_response,
+            )
             endpoints = api_disc.discover_all()
             for ep in endpoints:
                 if self._is_relevant_url(ep.url):
@@ -394,16 +517,18 @@ class AdvancedRecon:
         for path in ["/openapi.json", "/swagger.json", "/api-docs", "/v2/api-docs", "/v3/api-docs"]:
             spec_url = urllib.parse.urljoin(base_url, path)
             try:
-                req = urllib.request.Request(spec_url, headers={"User-Agent": "XSSBoss-Recon/1.0", "Accept": "application/json"})
-                with urllib.request.urlopen(req, timeout=4.0) as resp:
-                    raw = resp.read()
-                    data = json.loads(raw.decode("utf-8", errors="ignore") if isinstance(raw, bytes) else str(raw))
-                    paths = data.get("paths", {})
-                    if isinstance(paths, dict):
-                        for p in paths:
-                            full_ep = urllib.parse.urljoin(base_url, p)
-                            if self._is_relevant_url(full_ep):
-                                discovered.add(full_ep)
+                raw = self._fetch_active_text(
+                    spec_url,
+                    timeout=4.0,
+                    headers={"User-Agent": "XSSBoss-Recon/1.0", "Accept": "application/json"},
+                )
+                data = json.loads(raw)
+                paths = data.get("paths", {})
+                if isinstance(paths, dict):
+                    for p in paths:
+                        full_ep = urllib.parse.urljoin(base_url, p)
+                        if self._is_relevant_url(full_ep):
+                            discovered.add(full_ep)
             except Exception:
                 continue
 
@@ -449,27 +574,23 @@ class AdvancedRecon:
         for cand in gql_candidates:
             cand_url = urllib.parse.urljoin(base_url, cand)
             try:
-                req = urllib.request.Request(
+                raw = self._fetch_active_text(
                     cand_url,
+                    timeout=4.0,
                     data=introspection_query,
-                    headers={
-                        "Content-Type": "application/json",
-                        "User-Agent": "XSSBoss-Recon/1.0"
-                    },
-                    method="POST"
+                    headers={"Content-Type": "application/json", "User-Agent": "XSSBoss-Recon/1.0"},
+                    method="POST",
                 )
-                with urllib.request.urlopen(req, timeout=4.0) as resp:
-                    if resp.status == 200:
-                        data = json.loads(resp.read().decode("utf-8", errors="ignore"))
-                        schema = data.get("data", {}).get("__schema", {})
-                        discovered.add(cand_url)
-                        for t in ["queryType", "mutationType"]:
-                            fields = (schema.get(t) or {}).get("fields", [])
-                            for f in fields:
-                                field_name = f.get("name")
-                                if field_name:
-                                    query_url = f"{cand_url}?query={{{field_name}}}"
-                                    discovered.add(query_url)
+                data = json.loads(raw)
+                schema = data.get("data", {}).get("__schema", {})
+                discovered.add(cand_url)
+                for t in ["queryType", "mutationType"]:
+                    fields = (schema.get(t) or {}).get("fields", [])
+                    for f in fields:
+                        field_name = f.get("name")
+                        if field_name:
+                            query_url = f"{cand_url}?query={{{field_name}}}"
+                            discovered.add(query_url)
             except Exception:
                 pass
 
@@ -505,20 +626,20 @@ class AdvancedRecon:
         def fetch_script_content(js_url: str):
             try:
                 full_js_url = urllib.parse.urljoin(base_url, js_url)
-                req = urllib.request.Request(full_js_url, headers={"User-Agent": "XSSBoss-Recon/1.0"})
-                with urllib.request.urlopen(req, timeout=3.0) as resp:
-                    return js_url, resp.read().decode("utf-8", errors="ignore")
+                return js_url, self._fetch_active_text(
+                    full_js_url, timeout=3.0, headers={"User-Agent": "XSSBoss-Recon/1.0"}
+                )
             except Exception:
                 return js_url, ""
 
         def fetch_html_inline_scripts(html_url: str):
             try:
                 full_html_url = urllib.parse.urljoin(base_url, html_url)
-                req = urllib.request.Request(full_html_url, headers={"User-Agent": "XSSBoss-Recon/1.0"})
-                with urllib.request.urlopen(req, timeout=3.0) as resp:
-                    html_content = resp.read().decode("utf-8", errors="ignore")
-                    inline_scripts = re.findall(r'<script(?![^>]*\bsrc\b)[^>]*>(.*?)</script>', html_content, flags=re.IGNORECASE | re.DOTALL)
-                    return html_url, "\n".join(inline_scripts)
+                html_content = self._fetch_active_text(
+                    full_html_url, timeout=3.0, headers={"User-Agent": "XSSBoss-Recon/1.0"}
+                )
+                inline_scripts = re.findall(r'<script(?![^>]*\bsrc\b)[^>]*>(.*?)</script>', html_content, flags=re.IGNORECASE | re.DOTALL)
+                return html_url, "\n".join(inline_scripts)
             except Exception:
                 return html_url, ""
 
@@ -526,8 +647,14 @@ class AdvancedRecon:
         html_list = [ep.url_pattern for ep in html_endpoints][:15]
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
-            future_to_url = {executor.submit(fetch_script_content, url): url for url in js_list}
-            future_to_html = {executor.submit(fetch_html_inline_scripts, url): url for url in html_list}
+            future_to_url = {
+                executor.submit(contextvars.copy_context().run, fetch_script_content, url): url
+                for url in js_list
+            }
+            future_to_html = {
+                executor.submit(contextvars.copy_context().run, fetch_html_inline_scripts, url): url
+                for url in html_list
+            }
             all_futures = {**future_to_url, **future_to_html}
 
             for future in concurrent.futures.as_completed(all_futures):
@@ -556,6 +683,13 @@ class AdvancedRecon:
         # Register mined custom parameters to all target GET endpoints
         if mined_params:
             logger.info(f"[Advanced Recon] Mined custom query parameters from scripts: {list(mined_params)}")
+            target_name = self.target.name if self.target else "Recon Engine"
+            try:
+                from backend_api.services.learned_dictionary_service import LearnedDictionaryService
+                LearnedDictionaryService.register_batch(mined_params, source=target_name)
+            except Exception as le_err:
+                logger.warning(f"[Advanced Recon] Auto-learn dictionary registration warning: {le_err}")
+
             get_endpoints = [ep for ep in endpoints if ep.method == "GET" and not ep.url_pattern.split("?")[0].endswith(".js")]
             for ep in get_endpoints:
                 for param_name in mined_params:
@@ -580,12 +714,20 @@ class AdvancedRecon:
     # =========================================================================
 
     def mine_parameters(self):
-        """Append common hidden parameters to target endpoints."""
+        """Append common and auto-learned hidden parameters to target endpoints."""
         endpoints = self.db.query(Endpoint).filter(Endpoint.target_id == self.target_id).all()
+        fuzz_params = list(COMMON_XSS_PARAMS)
+        try:
+            from backend_api.services.learned_dictionary_service import LearnedDictionaryService
+            learned_names = LearnedDictionaryService.get_fuzzing_param_names()
+            fuzz_params = list(dict.fromkeys(COMMON_XSS_PARAMS + learned_names))
+        except Exception:
+            pass
+
         for ep in endpoints:
             if ep.url_pattern.split("?")[0].endswith(tuple(STATIC_MEDIA_EXTENSIONS)):
                 continue
-            for param_name in COMMON_XSS_PARAMS:
+            for param_name in fuzz_params:
                 exists = self.db.query(Param).filter(
                     Param.endpoint_id == ep.id,
                     Param.name == param_name
@@ -599,4 +741,22 @@ class AdvancedRecon:
                     )
                     self.db.add(param)
         self.db.commit()
-        logger.info(f"[Advanced Recon] Successfully mined common hidden parameters on {len(endpoints)} endpoint(s).")
+        logger.info(f"[Advanced Recon] Successfully seeded {len(fuzz_params)} common/learned hidden parameters on {len(endpoints)} endpoint(s).")
+
+    # =========================================================================
+    # 7. Google Dorking Engine (Learned from PDF Research)
+    # =========================================================================
+
+    @staticmethod
+    def generate_target_dorks(domain: str) -> List[Dict[str, str]]:
+        """Generate high-yield Google/OSINT dorks targeting vulnerabilities, secrets, and XSS reflections."""
+        clean_domain = domain.lower().replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
+        categories = [
+            ("xss_reflection", f'site:{clean_domain} inurl:(q|query|search|redirect|url|return|dest)=', "Reflection parameters prone to XSS and Open Redirects"),
+            ("exposed_api", f'site:{clean_domain} inurl:(api|swagger|graphql|v1|v2|openapi)', "Exposed API endpoints and documentation schema"),
+            ("sensitive_files", f'site:{clean_domain} ext:(env|log|sql|bak|yml|yaml|json|conf|config)', "Accidental exposures of secrets and database backups"),
+            ("directory_listing", f'site:{clean_domain} intitle:"index of"', "Enabled web directory indexing revealing source files"),
+            ("admin_portals", f'site:{clean_domain} inurl:(admin|login|portal|dashboard|auth)', "Administrative entry points and login planes"),
+            ("oauth_redirects", f'site:{clean_domain} inurl:(redirect_uri|callback|oauth|authorize)', "OAuth authorization flows for redirect manipulation"),
+        ]
+        return [{"category": cat, "dork": dork, "description": desc} for cat, dork, desc in categories]

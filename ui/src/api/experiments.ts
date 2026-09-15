@@ -64,5 +64,29 @@ export const experimentsApi = {
   delete: async (id: number): Promise<void> => {
     await api.delete(`/experiments/${id}`);
   },
+
+  /** Re-queue / retry a specific test case */
+  retryTestCase: async (experimentId: number, testCaseId: number): Promise<{ status: string; message: string }> => {
+    const response = await api.post<{ status: string; message: string }>(`/experiments/${experimentId}/retry-test-case/${testCaseId}`);
+    return response.data;
+  },
+
+  /** Inject on-the-fly custom payload */
+  injectPayload: async (
+    experimentId: number,
+    data: { endpoint_id: number; param_id: number; context_id?: number; payload: string }
+  ): Promise<{ status: string; test_case_id: number; token: string; message: string }> => {
+    const response = await api.post<{ status: string; test_case_id: number; token: string; message: string }>(
+      `/experiments/${experimentId}/inject-payload`,
+      data
+    );
+    return response.data;
+  },
+
+  /** Reset rate limiter throttle state */
+  resetThrottle: async (experimentId: number): Promise<any> => {
+    const response = await api.post(`/experiments/${experimentId}/throttle/reset`);
+    return response.data;
+  },
 };
 

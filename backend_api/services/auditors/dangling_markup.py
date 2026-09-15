@@ -7,13 +7,16 @@ script-blocking Content Security Policies (CSP).
 import re
 from typing import Any, Dict, Iterable, List, Optional
 import httpx
+from bs4 import BeautifulSoup
 from sqlalchemy.orm import Session
 
+from backend_api.config import settings
 from backend_api.models.endpoint import Endpoint
 from backend_api.models.param import Param
 from backend_api.models.finding import Finding, FindingStatus, Severity
 from backend_api.utils.logger import logger
 from backend_api.utils.request_builder import RequestBuilder
+from backend_api.utils.rate_limiter import rate_limited_call
 
 
 class DanglingMarkupAuditor:
@@ -54,7 +57,7 @@ class DanglingMarkupAuditor:
 
                 for payload, vuln_type, severity in DanglingMarkupAuditor.PROBES:
                     try:
-                        hit = DanglingMarkupAuditor._test_payload(endpoint, param, payload)
+                        hit = DanglingMarkupAuditor._test_payload(endpoint, param, payload, vuln_type)
                         if hit:
                             finding = DanglingMarkupAuditor._upsert_finding(
                                 db=db,
@@ -79,33 +82,85 @@ class DanglingMarkupAuditor:
         return findings
 
     @staticmethod
-    def _test_payload(endpoint: Endpoint, param: Param, payload: str) -> Optional[Dict[str, Any]]:
-        """Send probe request and check if unterminated tag reflects unescaped into HTML."""
+    def _test_payload(
+        endpoint: Endpoint,
+        param: Param,
+        payload: str,
+        vuln_type: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Require a parsed exfiltration element, not mere source reflection."""
         target_url = RequestBuilder.url_with_query_param(endpoint.url_pattern, param.name, payload)
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
         }
 
+        from backend_api.utils.stealth import get_http_proxy_kwargs
+        proxy_kwargs = get_http_proxy_kwargs(rotated=True)
+
         try:
-            with httpx.Client(timeout=4.0, follow_redirects=True, verify=False) as client:
-                resp = client.get(target_url, headers=headers)
+            with httpx.Client(
+                timeout=4.0,
+                follow_redirects=True,
+                verify=not settings.ALLOW_INSECURE_TLS,
+                **proxy_kwargs,
+            ) as client:
+                resp = rate_limited_call(
+                    target_url,
+                    lambda: client.get(target_url, headers=headers),
+                )
                 body = resp.text
 
-                # Check for unescaped reflection of the dangling payload
-                if payload in body:
-                    # Check if sensitive tokens or subsequent markup follow the dangling tag
-                    after_idx = body.find(payload) + len(payload)
-                    subsequent_slice = body[after_idx: after_idx + 200]
+                content_type = (resp.headers.get("content-type") or "").lower()
+                if payload not in body or (content_type and "html" not in content_type):
+                    return None
 
-                    has_csrf = bool(re.search(r'(?:csrf|token|nonce|auth|secret|password)', subsequent_slice, re.IGNORECASE))
-                    return {
-                        "type": "dangling_markup",
-                        "reflected_tag": payload,
-                        "exfiltration_surface": subsequent_slice[:100],
-                        "sensitive_token_exposed": has_csrf,
-                        "status_code": resp.status_code
-                    }
+                # Python's stdlib HTML parser follows the same critical rule as
+                # browsers here: an unterminated quoted tag is discarded rather
+                # than becoming a live <img>/<iframe>. Inspect the parsed tree
+                # and require a real URL-bearing sink controlled by our canary.
+                soup = BeautifulSoup(body, "html.parser")
+                sink_specs = {
+                    "dangling_markup_img": ("img", "src"),
+                    "dangling_markup_iframe": ("iframe", "src"),
+                    "dangling_markup_link": ("link", "href"),
+                    "dangling_markup_form": ("form", "action"),
+                    "base_tag_hijacking": ("base", "href"),
+                }
+                tag_name, attr_name = sink_specs.get(vuln_type or "", (None, None))
+                if not tag_name:
+                    return None
+
+                sink = next(
+                    (
+                        node for node in soup.find_all(tag_name)
+                        if DanglingMarkupAuditor.CANARY_HOST in str(node.get(attr_name) or "")
+                    ),
+                    None,
+                )
+                if sink is None:
+                    return None
+
+                sink_value = str(sink.get(attr_name) or "")
+                has_sensitive_data = bool(
+                    re.search(r'(?:csrf|token|nonce|auth|secret|password)', sink_value, re.IGNORECASE)
+                )
+                if vuln_type in {
+                    "dangling_markup_img",
+                    "dangling_markup_iframe",
+                    "dangling_markup_link",
+                } and not has_sensitive_data:
+                    return None
+
+                return {
+                    "type": "dangling_markup",
+                    "reflected_tag": payload,
+                    "dom_sink_created": True,
+                    "sink": f"{tag_name}.{attr_name}",
+                    "sink_value": sink_value[:200],
+                    "sensitive_token_exposed": has_sensitive_data,
+                    "status_code": resp.status_code,
+                }
         except Exception:
             pass
 
@@ -122,7 +177,7 @@ class DanglingMarkupAuditor:
         details: Dict[str, Any]
     ) -> Optional[Finding]:
         try:
-            evidence_summary = f"Dangling Markup Injection ({vuln_type}) detected via parameter '{param.name}'. Details: {details}"
+            evidence_summary = f"Dangling Markup Injection candidate ({vuln_type}) detected via parameter '{param.name}'. Details: {details}"
             finding = Finding(
                 endpoint_id=endpoint.id,
                 param_id=param.id,
@@ -130,9 +185,11 @@ class DanglingMarkupAuditor:
                 sink_id=None,
                 vuln_type=vuln_type,
                 scanner_module="dangling_markup_auditor",
-                confidence="firm",
+                confidence="tentative",
                 severity=severity,
-                status=FindingStatus.CONFIRMED,
+                # HTTP parsing proves controllable markup, but runtime/OOB
+                # evidence is still required before this can be confirmed.
+                status=FindingStatus.DRAFT,
                 best_payload=payload,
                 evidence_summary=evidence_summary,
                 report_text=evidence_summary,

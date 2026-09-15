@@ -1,6 +1,6 @@
 """One-shot scan schemas."""
 import enum
-from typing import Optional
+from typing import Any, Dict, Optional
 from pydantic import BaseModel, Field
 
 from backend_api.models.experiment import ExperimentStrategy
@@ -22,11 +22,25 @@ class ScanCreate(BaseModel):
     name: Optional[str] = None
     crawl: bool = True
     passive_recon: bool = False
-    max_depth: int = Field(default=1, ge=0, le=3)
-    max_pages: int = Field(default=15, ge=1, le=100)
-    strategy: ExperimentStrategy = ExperimentStrategy.QUICK_LIGHT
+    max_depth: int = Field(default=3, ge=0, le=5)
+    max_pages: int = Field(
+        default=150,
+        ge=1,
+        le=500,
+        description="Maximum representative pages after route-template deduplication.",
+    )
+    strategy: ExperimentStrategy = ExperimentStrategy.SMART_ADAPTIVE
     autonomous_research: bool = True
+    force_new: bool = Field(
+        default=False,
+        description="Start a separate run even when the same URL already has an active or paused experiment.",
+    )
     mode: ScanMode = ScanMode.FULL
+    auth_info: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Structured authorized identities, static session state, and login/workflow definitions.",
+    )
+    auth_identity: Optional[str] = Field(default=None, max_length=80)
 
 
 class ScanResponse(BaseModel):

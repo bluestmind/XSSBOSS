@@ -1,23 +1,29 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import axios from 'axios';
 
 /**
- * EndpointsMap - A premium HTML5 Canvas Force-Directed Node Graph.
- * Visualizes targets, endpoints, parameter structures, and security findings.
+ * EndpointsMap - Premium Force-Directed Cyber Attack Surface Graph.
+ * Visualizes targets, endpoints, parameter structures, and live security findings
+ * with particle flow animations, glowing bloom, and interactive node inspection.
  */
 function EndpointsMap({ targetId, monitor }) {
   const canvasRef = useRef(null);
+  const containerRef = useRef(null);
   
   // Graph Data States
   const [nodes, setNodes] = useState([]);
   const [links, setLinks] = useState([]);
   const [selectedNode, setSelectedNode] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
   
   // Filter and Control States
   const [showParams, setShowParams] = useState(true);
   const [showFindingsOnly, setShowFindingsOnly] = useState(false);
   const [showJsFiles, setShowJsFiles] = useState(true);
-  const [repulsionStrength, setRepulsionStrength] = useState(150);
+  const [isPhysicsActive, setIsPhysicsActive] = useState(true);
+  const [repulsionStrength, setRepulsionStrength] = useState(160);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   
   // Canvas View States
   const transformRef = useRef({ x: 0, y: 0, scale: 1 });
@@ -25,6 +31,7 @@ function EndpointsMap({ targetId, monitor }) {
   const draggedNodeRef = useRef(null);
   const hoveredNodeRef = useRef(null);
   const animationFrameRef = useRef(null);
+  const timeRef = useRef(0);
   
   // ---------------------------------------------------------------------------
   // 1. Data Collection & Graph Construction
@@ -39,32 +46,41 @@ function EndpointsMap({ targetId, monitor }) {
       let targetUrl = "Target Domain";
 
       if (monitor) {
-        // Build live from monitor stream
-        targetUrl = monitor.target.base_url;
+        targetUrl = monitor.target?.base_url || "Target Scope";
         
-        // Deduplicate endpoints and params from live checks
         const endpointMap = new Map();
         const paramMap = new Map();
         
         (monitor.recent_checks || []).forEach(check => {
-          const epKey = `${check.endpoint_method} ${check.endpoint_url}`;
+          let cleanUrl = check.endpoint_url || '';
+          try {
+            const parsed = new URL(cleanUrl);
+            cleanUrl = `${parsed.origin}${parsed.pathname}`;
+          } catch {}
+          if (cleanUrl.length > 1 && cleanUrl.endsWith('/')) {
+            cleanUrl = cleanUrl.slice(0, -1);
+          }
+          const method = (check.endpoint_method || 'GET').toUpperCase();
+          const epKey = `${method} ${cleanUrl}`;
           if (!endpointMap.has(epKey)) {
             endpointMap.set(epKey, {
-              id: `ep-${check.id}`,
-              method: check.endpoint_method,
-              url_pattern: check.endpoint_url,
+              id: `ep-${cleanUrl.replace(/[^a-zA-Z0-9]/g, '_')}`,
+              method: method,
+              url_pattern: cleanUrl,
               type: 'endpoint'
             });
           }
           
           if (check.param_name) {
-            const paramKey = `${epKey} - ${check.param_name}`;
+            const pName = String(check.param_name).trim();
+            const pLoc = (check.param_location || 'query').toLowerCase();
+            const paramKey = `${epKey} - ${pName}:${pLoc}`;
             if (!paramMap.has(paramKey)) {
               paramMap.set(paramKey, {
-                id: `param-${check.id}-${check.param_name}`,
+                id: `param-${cleanUrl.replace(/[^a-zA-Z0-9]/g, '_')}-${pName}-${pLoc}`,
                 endpointKey: epKey,
-                name: check.param_name,
-                location: check.param_location || 'query',
+                name: pName,
+                location: pLoc,
                 type: 'param'
               });
             }
@@ -77,33 +93,68 @@ function EndpointsMap({ targetId, monitor }) {
           id: `finding-${f.id || idx}`,
           endpoint_url: f.endpoint_url,
           param_name: f.param_name,
-          severity: f.severity,
+          severity: f.severity || 'high',
           vuln_type: f.vuln_type || 'xss',
-          payload: f.payload_preview,
+          payload: f.payload_preview || f.payload || '',
           type: 'finding'
         }));
       } else if (targetId) {
-        // Load static from database
         try {
           const epRes = await axios.get(`/api/v1/endpoints?target_id=${targetId}`);
-          rawEndpoints = epRes.data;
+          const fetchedEndpoints = epRes.data || [];
           
-          // Fetch parameters for each endpoint in parallel
+          // Deduplicate endpoints by method + normalized path
+          const dedupedEpMap = new Map();
+          fetchedEndpoints.forEach(ep => {
+            let cleanUrl = ep.url_pattern || '';
+            try {
+              const parsed = new URL(cleanUrl);
+              cleanUrl = `${parsed.origin}${parsed.pathname}`;
+            } catch {}
+            if (cleanUrl.length > 1 && cleanUrl.endsWith('/')) {
+              cleanUrl = cleanUrl.slice(0, -1);
+            }
+            const method = (ep.method || 'GET').toUpperCase();
+            const epKey = `${method} ${cleanUrl}`;
+            if (!dedupedEpMap.has(epKey)) {
+              dedupedEpMap.set(epKey, {
+                ...ep,
+                id: ep.id,
+                method: method,
+                url_pattern: cleanUrl,
+              });
+            }
+          });
+          rawEndpoints = Array.from(dedupedEpMap.values());
+          
           const paramPromises = rawEndpoints.map(ep => 
             axios.get(`/api/v1/params?endpoint_id=${ep.id}`).then(res => 
-              res.data.map(p => ({ ...p, endpointKey: `${ep.method} ${ep.url_pattern}` }))
-            )
+              (res.data || []).map(p => ({ ...p, endpointKey: `${ep.method} ${ep.url_pattern}` }))
+            ).catch(() => [])
           );
           const paramsList = await Promise.all(paramPromises);
-          rawParams = paramsList.flat();
+          const flatParams = paramsList.flat();
           
-          // Set target hostname
+          // Deduplicate params
+          const dedupedParamMap = new Map();
+          flatParams.forEach(p => {
+            const pKey = `${p.endpointKey} - ${p.name}:${p.location || 'query'}`;
+            if (!dedupedParamMap.has(pKey)) {
+              dedupedParamMap.set(pKey, p);
+            }
+          });
+          rawParams = Array.from(dedupedParamMap.values());
+          
           if (rawEndpoints.length > 0) {
-            const parsed = new URL(rawEndpoints[0].url_pattern);
-            targetUrl = parsed.origin;
+            try {
+              const parsed = new URL(rawEndpoints[0].url_pattern);
+              targetUrl = parsed.origin;
+            } catch {
+              targetUrl = rawEndpoints[0].url_pattern;
+            }
           }
         } catch (error) {
-          console.error("Failed to build static endpoints graph:", error);
+          console.error("Failed to build endpoints graph:", error);
         }
       } else {
         return;
@@ -111,28 +162,26 @@ function EndpointsMap({ targetId, monitor }) {
 
       if (!active) return;
 
-      // Construct nodes & links lists
       const newNodes = [];
       const newLinks = [];
       
-      // A. Center Target Node
+      // A. Center Root Target Node
       const rootId = 'root-target';
       newNodes.push({
         id: rootId,
         label: targetUrl,
         type: 'target',
-        radius: 20,
-        color: '#8b5cf6', // Indigo glow
+        radius: 22,
+        color: '#8b5cf6',
         x: 0, y: 0, vx: 0, vy: 0
       });
       
       // B. Filter & Add Endpoint Nodes
       const validEpKeys = new Set();
-      rawEndpoints.forEach(ep => {
-        const isJs = ep.url_pattern.split('?')[0].endsWith('.js');
+      rawEndpoints.forEach((ep, idx) => {
+        const isJs = (ep.url_pattern || '').split('?')[0].endsWith('.js');
         if (!showJsFiles && isJs) return;
         
-        // If showing findings only, verify this endpoint has findings attached
         if (showFindingsOnly) {
           const hasFinding = rawFindings.some(f => f.endpoint_url === ep.url_pattern);
           if (!hasFinding) return;
@@ -141,23 +190,33 @@ function EndpointsMap({ targetId, monitor }) {
         const epKey = `${ep.method} ${ep.url_pattern}`;
         validEpKeys.add(epKey);
         
+        const method = (ep.method || 'GET').toUpperCase();
+        let epColor = '#38bdf8'; // Sky blue GET
+        if (method === 'POST') epColor = '#f43f5e'; // Rose POST
+        else if (method === 'PUT' || method === 'PATCH') epColor = '#a855f7'; // Purple PUT
+        else if (method === 'DELETE') epColor = '#ef4444'; // Red DELETE
+        
+        const angle = (idx / Math.max(rawEndpoints.length, 1)) * 2 * Math.PI;
+        const initialDist = 130 + (idx % 3) * 25;
+        
         newNodes.push({
-          id: `ep-${ep.id}`,
+          id: `ep-${ep.id || idx}`,
           label: ep.url_pattern,
-          method: ep.method,
+          method: method,
           type: 'endpoint',
-          radius: 13,
-          color: ep.method === 'POST' ? '#f43f5e' : '#3b82f6', // Rose for POST, blue for GET
-          x: (Math.random() - 0.5) * 200,
-          y: (Math.random() - 0.5) * 200,
+          radius: 14,
+          color: epColor,
+          x: Math.cos(angle) * initialDist,
+          y: Math.sin(angle) * initialDist,
           vx: 0, vy: 0
         });
         
         newLinks.push({
           source: rootId,
-          target: `ep-${ep.id}`,
-          length: 120,
-          color: 'rgba(139, 92, 246, 0.2)'
+          target: `ep-${ep.id || idx}`,
+          length: 130,
+          color: 'rgba(139, 92, 246, 0.25)',
+          flowSpeed: 0.008
         });
       });
       
@@ -167,7 +226,7 @@ function EndpointsMap({ targetId, monitor }) {
           const epNode = rawEndpoints.find(e => `${e.method} ${e.url_pattern}` === param.endpointKey);
           if (!epNode || !validEpKeys.has(param.endpointKey)) return;
           
-          const epNodeId = `ep-${epNode.id}`;
+          const epNodeId = `ep-${epNode.id || ''}`;
           const createdEpNode = newNodes.find(n => n.id === epNodeId);
           const refX = createdEpNode ? createdEpNode.x : 0;
           const refY = createdEpNode ? createdEpNode.y : 0;
@@ -175,37 +234,39 @@ function EndpointsMap({ targetId, monitor }) {
           const paramNodeId = `param-${param.id || idx}`;
           newNodes.push({
             id: paramNodeId,
-            label: `${param.name} (${param.location})`,
+            label: `${param.name} (${param.location || 'query'})`,
             name: param.name,
-            location: param.location,
+            location: param.location || 'query',
             type: 'param',
             radius: 8,
-            color: '#f59e0b', // Amber/gold
-            x: refX + (Math.random() - 0.5) * 60,
-            y: refY + (Math.random() - 0.5) * 60,
+            color: '#fbbf24', // Amber/gold
+            x: refX + (Math.random() - 0.5) * 50,
+            y: refY + (Math.random() - 0.5) * 50,
             vx: 0, vy: 0
           });
           
           newLinks.push({
             source: epNodeId,
             target: paramNodeId,
-            length: 60,
-            color: 'rgba(245, 158, 11, 0.25)'
+            length: 65,
+            color: 'rgba(251, 191, 36, 0.3)',
+            flowSpeed: 0.012
           });
           
-          // D. Filter & Add Finding Nodes connected to Parameters
+          // D. Finding Nodes connected to Parameters
           rawFindings.forEach(f => {
             if (f.endpoint_url === epNode.url_pattern && f.param_name === param.name) {
               newNodes.push({
                 id: f.id,
-                label: `XSS (${f.severity})`,
+                label: `XSS (${(f.severity || 'high').toUpperCase()})`,
                 severity: f.severity,
                 payload: f.payload,
+                vuln_type: f.vuln_type,
                 type: 'finding',
-                radius: 11,
-                color: '#ef4444', // Neon Crimson
-                x: refX + (Math.random() - 0.5) * 90,
-                y: refY + (Math.random() - 0.5) * 90,
+                radius: 12,
+                color: '#ff2a5f',
+                x: refX + (Math.random() - 0.5) * 70,
+                y: refY + (Math.random() - 0.5) * 70,
                 vx: 0, vy: 0
               });
               
@@ -213,25 +274,21 @@ function EndpointsMap({ targetId, monitor }) {
                 source: paramNodeId,
                 target: f.id,
                 length: 45,
-                color: 'rgba(239, 68, 68, 0.4)'
+                color: 'rgba(255, 42, 95, 0.5)',
+                flowSpeed: 0.018
               });
             }
           });
         });
       }
       
-      // Map string references to actual objects for links
       const nodeMap = new Map(newNodes.map(n => [n.id, n]));
       const resolvedLinks = [];
       newLinks.forEach(link => {
         const sourceNode = nodeMap.get(link.source);
         const targetNode = nodeMap.get(link.target);
         if (sourceNode && targetNode) {
-          resolvedLinks.push({
-            ...link,
-            source: sourceNode,
-            target: targetNode
-          });
+          resolvedLinks.push({ ...link, source: sourceNode, target: targetNode });
         }
       });
       
@@ -240,253 +297,348 @@ function EndpointsMap({ targetId, monitor }) {
     }
     
     buildGraph();
-    
-    return () => {
-      active = false;
-    };
+    return () => { active = false; };
   }, [targetId, monitor, showParams, showFindingsOnly, showJsFiles]);
 
   // ---------------------------------------------------------------------------
-  // 2. Physics Simulation Loop
+  // 2. Physics Simulation Loop & Canvas Rendering
   // ---------------------------------------------------------------------------
   useEffect(() => {
     if (nodes.length === 0) return;
     
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const container = containerRef.current;
+    if (!canvas || !container) return;
     const ctx = canvas.getContext('2d');
     
-    // Auto-resize canvas
     const handleResize = () => {
-      canvas.width = canvas.parentElement.clientWidth;
-      canvas.height = 500;
+      if (!containerRef.current || !canvasRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const w = Math.max(200, Math.floor(rect.width));
+      const h = Math.max(300, Math.floor(rect.height || 540));
+      if (canvasRef.current.width !== w || canvasRef.current.height !== h) {
+        canvasRef.current.width = w;
+        canvasRef.current.height = h;
+      }
     };
     handleResize();
+    
+    let resizeObserver = null;
+    if (typeof ResizeObserver !== 'undefined' && container) {
+      resizeObserver = new ResizeObserver(() => {
+        handleResize();
+      });
+      resizeObserver.observe(container);
+    }
     window.addEventListener('resize', handleResize);
     
     let isRunning = true;
     
-    // Layout parameters
-    const k_repulsion = repulsionStrength * 100;
-    const k_attraction = 0.04;
-    const k_gravity = 0.01;
-    const damping = 0.85;
+    const k_repulsion = repulsionStrength * 90;
+    const k_attraction = 0.038;
+    const k_gravity = 0.012;
+    const damping = 0.88;
     
     function stepPhysics() {
       if (!isRunning) return;
+      timeRef.current += 1;
       
-      // A. Coulomb Repulsion
-      for (let i = 0; i < nodes.length; i++) {
-        const nodeA = nodes[i];
-        if (nodeA === draggedNodeRef.current) continue;
-        
-        for (let j = i + 1; j < nodes.length; j++) {
-          const nodeB = nodes[j];
-          const dx = nodeB.x - nodeA.x;
-          const dy = nodeB.y - nodeA.y;
-          let dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist < 12) {
-            // Overlap prevention: scatter them slightly
-            nodeA.x -= (Math.random() - 0.5) * 10;
-            nodeA.y -= (Math.random() - 0.5) * 10;
-            dist = 12;
-          }
+      if (isPhysicsActive) {
+        // A. Repulsion
+        for (let i = 0; i < nodes.length; i++) {
+          const nodeA = nodes[i];
+          if (nodeA === draggedNodeRef.current) continue;
           
-          if (dist < 400) {
-            const force = k_repulsion / (dist * dist);
-            const fx = (dx / dist) * force;
-            const fy = (dy / dist) * force;
+          for (let j = i + 1; j < nodes.length; j++) {
+            const nodeB = nodes[j];
+            const dx = nodeB.x - nodeA.x;
+            const dy = nodeB.y - nodeA.y;
+            let dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < 14) {
+              nodeA.x -= (Math.random() - 0.5) * 8;
+              nodeA.y -= (Math.random() - 0.5) * 8;
+              dist = 14;
+            }
             
-            nodeA.vx -= fx;
-            nodeA.vy -= fy;
-            nodeB.vx += fx;
-            nodeB.vy += fy;
+            if (dist < 450) {
+              const force = k_repulsion / (dist * dist);
+              const fx = (dx / dist) * force;
+              const fy = (dy / dist) * force;
+              
+              nodeA.vx -= fx;
+              nodeA.vy -= fy;
+              nodeB.vx += fx;
+              nodeB.vy += fy;
+            }
           }
         }
+        
+        // B. Attraction
+        links.forEach(link => {
+          const dx = link.target.x - link.source.x;
+          const dy = link.target.y - link.source.y;
+          let dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < 5) dist = 5;
+          
+          const force = k_attraction * (dist - link.length);
+          const fx = (dx / dist) * force;
+          const fy = (dy / dist) * force;
+          
+          if (link.source !== draggedNodeRef.current && link.source.id !== 'root-target') {
+            link.source.vx += fx;
+            link.source.vy += fy;
+          }
+          if (link.target !== draggedNodeRef.current) {
+            link.target.vx -= fx;
+            link.target.vy -= fy;
+          }
+        });
+        
+        // C. Center Centering
+        nodes.forEach(node => {
+          if (node === draggedNodeRef.current || node.id === 'root-target') return;
+          
+          const dx = 0 - node.x;
+          const dy = 0 - node.y;
+          node.vx += dx * k_gravity;
+          node.vy += dy * k_gravity;
+          
+          node.x += node.vx;
+          node.y += node.vy;
+          node.vx *= damping;
+          node.vy *= damping;
+        });
       }
       
-      // B. Hooke's Law Attraction along links
-      links.forEach(link => {
-        const dx = link.target.x - link.source.x;
-        const dy = link.target.y - link.source.y;
-        let dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < 5) dist = 5;
-        
-        const force = k_attraction * (dist - link.length);
-        const fx = (dx / dist) * force;
-        const fy = (dy / dist) * force;
-        
-        if (link.source !== draggedNodeRef.current) {
-          link.source.vx += fx;
-          link.source.vy += fy;
-        }
-        if (link.target !== draggedNodeRef.current) {
-          link.target.vx -= fx;
-          link.target.vy -= fy;
-        }
-      });
-      
-      // C. Gravity (Centering force)
-      nodes.forEach(node => {
-        if (node === draggedNodeRef.current) return;
-        
-        const dx = 0 - node.x;
-        const dy = 0 - node.y;
-        node.vx += dx * k_gravity;
-        node.vy += dy * k_gravity;
-        
-        // Update position
-        node.x += node.vx;
-        node.y += node.vy;
-        node.vx *= damping;
-        node.vy *= damping;
-      });
-      
-      // D. Draw frame
       drawFrame();
-      
       animationFrameRef.current = requestAnimationFrame(stepPhysics);
     }
     
     function drawFrame() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.save();
       
-      // Apply zoom & pan transforms
       const t = transformRef.current;
-      ctx.translate(canvas.width / 2 + t.x, canvas.height / 2 + t.y);
+      const centerX = canvas.width / 2 + t.x;
+      const centerY = canvas.height / 2 + t.y;
+      
+      // 1. Draw Deep Cyber Grid Pattern
+      ctx.save();
+      const gridSize = 40 * t.scale;
+      const startX = (centerX % gridSize) - gridSize;
+      const startY = (centerY % gridSize) - gridSize;
+      
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+      ctx.lineWidth = 1;
+      for (let x = startX; x < canvas.width + gridSize; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+      }
+      for (let y = startY; y < canvas.height + gridSize; y += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+      }
+      
+      // Ambient Radial Center Aura
+      const ambientGrad = ctx.createRadialGradient(centerX, centerY, 10, centerX, centerY, 380 * t.scale);
+      ambientGrad.addColorStop(0, 'rgba(139, 92, 246, 0.08)');
+      ambientGrad.addColorStop(0.5, 'rgba(56, 189, 248, 0.03)');
+      ambientGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = ambientGrad;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.restore();
+      
+      ctx.save();
+      ctx.translate(centerX, centerY);
       ctx.scale(t.scale, t.scale);
       
-      // 1. Draw Links
+      const now = Date.now();
+      
+      // 2. Draw Links & Animated Data Packets
       links.forEach(link => {
+        const isMatched = searchQuery && (
+          link.source.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          link.target.label.toLowerCase().includes(searchQuery.toLowerCase())
+        );
+        
+        ctx.save();
         ctx.beginPath();
         ctx.moveTo(link.source.x, link.source.y);
         ctx.lineTo(link.target.x, link.target.y);
-        ctx.strokeStyle = link.color;
-        ctx.lineWidth = 1.2;
+        ctx.strokeStyle = isMatched ? 'rgba(56, 189, 248, 0.8)' : link.color;
+        ctx.lineWidth = isMatched ? 2.2 : (link.target.type === 'finding' ? 2 : 1.2);
         ctx.stroke();
+        
+        // Flowing energy packet particle
+        const flowProg = (timeRef.current * (link.flowSpeed || 0.01)) % 1;
+        const px = link.source.x + (link.target.x - link.source.x) * flowProg;
+        const py = link.source.y + (link.target.y - link.source.y) * flowProg;
+        
+        ctx.beginPath();
+        ctx.arc(px, py, link.target.type === 'finding' ? 2.5 : 1.8, 0, 2 * Math.PI);
+        ctx.fillStyle = link.target.type === 'finding' ? '#ff2a5f' : '#38bdf8';
+        ctx.shadowColor = link.target.type === 'finding' ? '#ff2a5f' : '#38bdf8';
+        ctx.shadowBlur = 6;
+        ctx.fill();
+        ctx.restore();
       });
       
-      // 2. Draw Nodes
+      // 3. Draw Nodes with Glowing Multi-layer Rings
       nodes.forEach(node => {
         const isHovered = hoveredNodeRef.current === node;
         const isSelected = selectedNode === node;
+        const isSearched = searchQuery && node.label.toLowerCase().includes(searchQuery.toLowerCase());
         
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, node.radius + (isHovered ? 2 : 0), 0, 2 * Math.PI);
+        ctx.save();
         
-        // Halo effect for Target and Finding nodes
+        // Halo & Glow Radiance
         if (node.type === 'target') {
-          const grad = ctx.createRadialGradient(node.x, node.y, node.radius, node.x, node.y, node.radius + 15);
-          grad.addColorStop(0, 'rgba(99, 102, 241, 0.2)');
-          grad.addColorStop(1, 'rgba(99, 102, 241, 0)');
+          const ringPulse = Math.sin(now / 400) * 3;
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, node.radius + 12 + ringPulse, 0, 2 * Math.PI);
+          ctx.strokeStyle = 'rgba(139, 92, 246, 0.35)';
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([4, 4]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          
+          const grad = ctx.createRadialGradient(node.x, node.y, node.radius, node.x, node.y, node.radius + 25);
+          grad.addColorStop(0, 'rgba(139, 92, 246, 0.35)');
+          grad.addColorStop(1, 'rgba(139, 92, 246, 0)');
           ctx.fillStyle = grad;
-          ctx.arc(node.x, node.y, node.radius + 15, 0, 2 * Math.PI);
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, node.radius + 25, 0, 2 * Math.PI);
           ctx.fill();
         } else if (node.type === 'finding') {
-          // Pulse pulsing animation
-          const pulse = 4 + Math.sin(Date.now() / 150) * 3;
-          ctx.fillStyle = 'rgba(239, 68, 68, 0.15)';
+          const pulse = 6 + Math.sin(now / 120) * 4;
+          ctx.fillStyle = 'rgba(255, 42, 95, 0.25)';
+          ctx.beginPath();
           ctx.arc(node.x, node.y, node.radius + pulse, 0, 2 * Math.PI);
           ctx.fill();
         }
         
-        // Base Node Fill
-        ctx.fillStyle = node.color;
+        // Node Base Body with Radial Specular Highlight
+        const baseGrad = ctx.createRadialGradient(
+          node.x - node.radius * 0.3, 
+          node.y - node.radius * 0.3, 
+          node.radius * 0.1, 
+          node.x, 
+          node.y, 
+          node.radius
+        );
+        baseGrad.addColorStop(0, '#ffffff');
+        baseGrad.addColorStop(0.3, node.color);
+        baseGrad.addColorStop(1, node.type === 'target' ? '#6d28d9' : (node.type === 'finding' ? '#9f1239' : '#0f172a'));
+        
         ctx.beginPath();
-        ctx.arc(node.x, node.y, node.radius, 0, 2 * Math.PI);
+        ctx.arc(node.x, node.y, node.radius + (isHovered || isSearched ? 3 : 0), 0, 2 * Math.PI);
+        ctx.fillStyle = baseGrad;
+        ctx.shadowColor = node.color;
+        ctx.shadowBlur = (isSelected || isHovered || isSearched) ? 16 : 8;
         ctx.fill();
         
-        // Outline selected node
-        if (isSelected) {
-          ctx.strokeStyle = '#4f46e5';
-          ctx.lineWidth = 2.5;
-          ctx.stroke();
-        } else {
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
-          ctx.lineWidth = 1.2;
-          ctx.stroke();
-        }
+        // Outer Crisp Border
+        ctx.strokeStyle = isSelected 
+          ? '#ffffff' 
+          : (isSearched ? '#38bdf8' : (isHovered ? '#f8fafc' : 'rgba(255, 255, 255, 0.4)'));
+        ctx.lineWidth = isSelected ? 2.5 : (isHovered ? 2 : 1.2);
+        ctx.stroke();
         
-        // Display HTTP Method label for endpoints
+        // Endpoint HTTP Method Badges
         if (node.type === 'endpoint' && node.method) {
+          ctx.shadowBlur = 0;
           ctx.fillStyle = '#ffffff';
-          ctx.font = 'bold 8px system-ui';
+          ctx.font = 'bold 8px ui-monospace, SFMono-Regular, Menlo, monospace';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillText(node.method, node.x, node.y);
         }
         
-        // Draw labels for root target & findings
-        if (node.type === 'target' || node.type === 'finding') {
-          ctx.fillStyle = '#B7C2D8';
-          ctx.font = node.type === 'target' ? '600 12px system-ui' : '600 10px system-ui';
+        // Node Text Labels for Root Target and Vulnerabilities
+        if (node.type === 'target' || node.type === 'finding' || isHovered || isSelected || isSearched) {
+          ctx.shadowBlur = 4;
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+          ctx.fillStyle = node.type === 'finding' ? '#fecdd3' : '#e2e8f0';
+          ctx.font = node.type === 'target' 
+            ? 'bold 12px system-ui' 
+            : (node.type === 'finding' ? 'bold 11px system-ui' : '10px system-ui');
           ctx.textAlign = 'center';
           ctx.textBaseline = 'top';
-          ctx.fillText(node.label.length > 30 ? node.label.slice(0, 27) + '...' : node.label, node.x, node.y + node.radius + 5);
+          
+          let displayLabel = node.label;
+          if (displayLabel.length > 34) {
+            displayLabel = displayLabel.slice(0, 31) + '...';
+          }
+          ctx.fillText(displayLabel, node.x, node.y + node.radius + 6);
         }
+        
+        ctx.restore();
       });
       
-      // 3. Draw tooltip for hovered node
+      // 4. Sleek Cyber Tooltip on Hover
       if (hoveredNodeRef.current) {
         const node = hoveredNodeRef.current;
-        ctx.restore(); // Draw tooltip in canvas space
+        ctx.restore();
         
         ctx.save();
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.08)';
-        ctx.shadowBlur = 6;
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.95)'; // Dark slate tooltip
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-        ctx.lineWidth = 1;
-        
-        const pad = 10;
+        const pad = 12;
         const text = node.label;
-        ctx.font = '11px system-ui';
-        const width = ctx.measureText(text).width + pad * 2;
-        const height = 30;
+        ctx.font = '500 11px ui-monospace, SFMono-Regular, Menlo, monospace';
+        const textWidth = ctx.measureText(text).width;
+        const width = Math.max(textWidth + pad * 2, 120);
+        const height = 34;
         
-        // Map node pos back to canvas coordinates
-        const screenX = (node.x * t.scale) + canvas.width / 2 + t.x;
-        const screenY = (node.y * t.scale) + canvas.height / 2 + t.y;
+        const screenX = (node.x * t.scale) + centerX;
+        const screenY = (node.y * t.scale) + centerY;
         
-        const rx = screenX - width / 2;
-        const ry = screenY - node.radius * t.scale - height - 10;
+        const rx = Math.max(10, Math.min(canvas.width - width - 10, screenX - width / 2));
+        const ry = Math.max(10, screenY - node.radius * t.scale - height - 12);
         
-        // Draw tooltip box
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+        ctx.shadowBlur = 12;
+        ctx.fillStyle = 'rgba(10, 15, 29, 0.95)';
+        ctx.strokeStyle = node.color || 'rgba(56, 189, 248, 0.5)';
+        ctx.lineWidth = 1.5;
+        
         ctx.beginPath();
-        ctx.roundRect(rx, ry, width, height, 6);
+        ctx.roundRect(rx, ry, width, height, 8);
         ctx.fill();
         ctx.stroke();
         
-        // Tooltip text
-        ctx.fillStyle = '#ffffff';
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = '#f8fafc';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(text, rx + width / 2, ry + height / 2);
         ctx.restore();
+        
         ctx.save();
-        ctx.translate(canvas.width / 2 + t.x, canvas.height / 2 + t.y);
+        ctx.translate(centerX, centerY);
         ctx.scale(t.scale, t.scale);
       }
       
       ctx.restore();
     }
     
-    // Start loop
     animationFrameRef.current = requestAnimationFrame(stepPhysics);
     
     return () => {
       isRunning = false;
       window.removeEventListener('resize', handleResize);
+      if (resizeObserver) resizeObserver.disconnect();
       cancelAnimationFrame(animationFrameRef.current);
     };
-  }, [nodes, links, selectedNode, repulsionStrength]);
+  }, [nodes, links, selectedNode, repulsionStrength, isPhysicsActive, searchQuery]);
 
   // ---------------------------------------------------------------------------
-  // 3. Mouse Interaction Handlers
+  // 3. Mouse Interaction & Navigation Controls
   // ---------------------------------------------------------------------------
   const getMousePos = (e) => {
     const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
     return {
       x: e.clientX - rect.left,
@@ -496,6 +648,7 @@ function EndpointsMap({ targetId, monitor }) {
 
   const toGraphCoords = (pos) => {
     const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
     const t = transformRef.current;
     return {
       x: (pos.x - canvas.width / 2 - t.x) / t.scale,
@@ -507,14 +660,13 @@ function EndpointsMap({ targetId, monitor }) {
     const pos = getMousePos(e);
     const graphPos = toGraphCoords(pos);
     
-    // Check if clicked a node
     let clickedNode = null;
     for (let i = nodes.length - 1; i >= 0; i--) {
       const node = nodes[i];
       const dx = graphPos.x - node.x;
       const dy = graphPos.y - node.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < node.radius + 3) {
+      if (dist < node.radius + 5) {
         clickedNode = node;
         break;
       }
@@ -523,6 +675,7 @@ function EndpointsMap({ targetId, monitor }) {
     if (clickedNode) {
       draggedNodeRef.current = clickedNode;
       setSelectedNode(clickedNode);
+      setIsSidebarOpen(true);
     } else {
       mouseRef.current.isDown = true;
       mouseRef.current.dragStart = { x: pos.x - transformRef.current.x, y: pos.y - transformRef.current.y };
@@ -542,14 +695,13 @@ function EndpointsMap({ targetId, monitor }) {
       transformRef.current.x = pos.x - mouseRef.current.dragStart.x;
       transformRef.current.y = pos.y - mouseRef.current.dragStart.y;
     } else {
-      // Find hovered node
       let foundHover = null;
       for (let i = nodes.length - 1; i >= 0; i--) {
         const node = nodes[i];
         const dx = graphPos.x - node.x;
         const dy = graphPos.y - node.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < node.radius + 3) {
+        if (dist < node.radius + 5) {
           foundHover = node;
           break;
         }
@@ -568,209 +720,336 @@ function EndpointsMap({ targetId, monitor }) {
     const pos = getMousePos(e);
     const graphPos = toGraphCoords(pos);
     
-    const zoomFactor = 1.1;
+    const zoomFactor = 1.12;
     const nextScale = e.deltaY < 0 
       ? transformRef.current.scale * zoomFactor 
       : transformRef.current.scale / zoomFactor;
       
-    // Clamp zoom scale between 0.15 and 4
-    const scale = Math.max(0.15, Math.min(4, nextScale));
+    const scale = Math.max(0.2, Math.min(3.5, nextScale));
     
-    // Zoom centered on mouse pointer
     const canvas = canvasRef.current;
-    transformRef.current.x = pos.x - canvas.width / 2 - graphPos.x * scale;
-    transformRef.current.y = pos.y - canvas.height / 2 - graphPos.y * scale;
-    transformRef.current.scale = scale;
+    if (canvas) {
+      transformRef.current.x = pos.x - canvas.width / 2 - graphPos.x * scale;
+      transformRef.current.y = pos.y - canvas.height / 2 - graphPos.y * scale;
+      transformRef.current.scale = scale;
+    }
+  };
+
+  const zoomIn = () => {
+    transformRef.current.scale = Math.min(3.5, transformRef.current.scale * 1.25);
+  };
+
+  const zoomOut = () => {
+    transformRef.current.scale = Math.max(0.2, transformRef.current.scale / 1.25);
   };
 
   const resetTransform = () => {
     transformRef.current = { x: 0, y: 0, scale: 1 };
-    // Scatter nodes slightly to start animation
     nodes.forEach(n => {
       if (n.id !== 'root-target') {
-        n.x = (Math.random() - 0.5) * 150;
-        n.y = (Math.random() - 0.5) * 150;
+        n.vx = (Math.random() - 0.5) * 15;
+        n.vy = (Math.random() - 0.5) * 15;
       }
     });
   };
 
+  const endpointCount = useMemo(() => nodes.filter(n => n.type === 'endpoint').length, [nodes]);
+  const paramCount = useMemo(() => nodes.filter(n => n.type === 'param').length, [nodes]);
+  const findingCount = useMemo(() => nodes.filter(n => n.type === 'finding').length, [nodes]);
+
   // ---------------------------------------------------------------------------
-  // 4. Render Component Layout
+  // 4. Render Layout & Node Inspector
   // ---------------------------------------------------------------------------
   return (
-    <div className="bg-carbon-850 border border-carbon-700 rounded-lg shadow-sm overflow-hidden text-carbon-200 flex flex-col h-[580px]">
+    <div className={`bg-carbon-900/90 border border-carbon-700/80 rounded-xl shadow-2xl overflow-hidden text-carbon-200 flex flex-col transition-all duration-200 ${
+      isFullscreen ? 'fixed inset-4 z-50 h-[calc(100vh-2rem)] bg-carbon-950' : 'h-[620px]'
+    }`}>
       {/* Header bar */}
-      <div className="bg-carbon-850/50 border-b border-carbon-700 px-6 py-4 flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h2 className="text-md font-semibold text-carbon-100 flex items-center gap-2">
-            🕸️ Live Recon Achievement Graph
-          </h2>
-          <p className="text-xs text-carbon-400">
-            Interactive, force-directed network showing target endpoints, parameters, and findings.
-          </p>
+      <div className="bg-carbon-850/80 backdrop-blur-md border-b border-carbon-700/80 px-4 py-3 flex flex-wrap items-center justify-between gap-3 shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-brand-500/20 border border-brand-500/40 flex items-center justify-center text-brand-300 shadow-inner">
+            🕸️
+          </div>
+          <div>
+            <h2 className="text-sm font-bold text-carbon-100 flex items-center gap-2 tracking-wide">
+              Live Recon Achievement Graph
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-brand-500/15 border border-brand-500/30 text-brand-300 font-mono">
+                CYBERNETIC TOPOLOGY
+              </span>
+            </h2>
+            <p className="text-[11px] text-carbon-400">
+              Interactive force-directed attack surface map with live packet streaming & sink tracing.
+            </p>
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-3 text-xs">
-          <label className="flex items-center gap-1.5 cursor-pointer select-none">
+
+        {/* Filter Controls & Action Buttons */}
+        <div className="flex flex-wrap items-center gap-2.5 text-xs">
+          <input
+            type="text"
+            placeholder="Search nodes & URLs..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="bg-carbon-950/70 border border-carbon-700/80 rounded-lg px-2.5 py-1 text-xs text-carbon-100 placeholder-carbon-500 focus:outline-none focus:border-brand-500/60 w-36 sm:w-44"
+          />
+
+          <label className="flex items-center gap-1.5 cursor-pointer select-none px-2 py-1 rounded bg-carbon-800/60 border border-carbon-700/60 hover:border-carbon-600">
             <input 
               type="checkbox" 
               checked={showParams} 
               onChange={e => setShowParams(e.target.checked)} 
-              className="rounded border-carbon-600 bg-carbon-850 text-brand-300 focus:ring-0 focus:ring-offset-0"
+              className="rounded border-carbon-600 bg-carbon-850 text-brand-400 focus:ring-0 focus:ring-offset-0"
             />
-            <span>Params</span>
+            <span className="text-carbon-300 font-medium text-[11px]">Params</span>
           </label>
-          <label className="flex items-center gap-1.5 cursor-pointer select-none">
+
+          <label className="flex items-center gap-1.5 cursor-pointer select-none px-2 py-1 rounded bg-carbon-800/60 border border-carbon-700/60 hover:border-carbon-600">
             <input 
               type="checkbox" 
               checked={showJsFiles} 
               onChange={e => setShowJsFiles(e.target.checked)} 
-              className="rounded border-carbon-600 bg-carbon-850 text-brand-300 focus:ring-0 focus:ring-offset-0"
+              className="rounded border-carbon-600 bg-carbon-850 text-brand-400 focus:ring-0 focus:ring-offset-0"
             />
-            <span>JS Files</span>
+            <span className="text-carbon-300 font-medium text-[11px]">JS Files</span>
           </label>
-          <label className="flex items-center gap-1.5 cursor-pointer select-none">
+
+          <label className="flex items-center gap-1.5 cursor-pointer select-none px-2 py-1 rounded bg-rose-500/10 border border-rose-500/30 hover:border-rose-500/50">
             <input 
               type="checkbox" 
               checked={showFindingsOnly} 
               onChange={e => setShowFindingsOnly(e.target.checked)} 
-              className="rounded border-carbon-600 bg-carbon-850 text-brand-300 focus:ring-0 focus:ring-offset-0"
+              className="rounded border-rose-600 bg-carbon-850 text-rose-500 focus:ring-0 focus:ring-offset-0"
             />
-            <span className="text-rose-500 font-semibold">Findings Only</span>
+            <span className="text-rose-400 font-semibold text-[11px]">Findings</span>
           </label>
-          <button 
+
+          {/* Inspector Toggle */}
+          <button
             type="button"
-            onClick={resetTransform}
-            className="bg-carbon-850 hover:bg-carbon-850/50 border border-carbon-700 text-carbon-300 px-2.5 py-1 rounded shadow-sm"
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+            className={`px-2.5 py-1 rounded text-[11px] font-semibold flex items-center gap-1 transition ${
+              isSidebarOpen 
+                ? 'bg-brand-500/20 text-brand-200 border border-brand-500/40 shadow-glow-brand' 
+                : 'bg-carbon-800 text-carbon-400 border border-carbon-700 hover:text-carbon-200'
+            }`}
+            title={isSidebarOpen ? "Close Inspector" : "Open Inspector"}
           >
-            Reset Layout
+            <span>🔍</span>
+            <span className="hidden sm:inline">Inspector</span>
+          </button>
+
+          {/* Fullscreen Mode Toggle */}
+          <button
+            type="button"
+            onClick={() => setIsFullscreen(!isFullscreen)}
+            className="p-1 rounded text-carbon-400 hover:text-carbon-100 hover:bg-carbon-800 transition"
+            title={isFullscreen ? "Exit Fullscreen" : "Fullscreen View"}
+          >
+            {isFullscreen ? '✕' : '⛶'}
           </button>
         </div>
       </div>
 
-      {/* Main Container */}
-      <div className="flex-1 flex relative">
-        <canvas 
-          ref={canvasRef}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
-          onWheel={handleWheel}
-          className="flex-1 cursor-grab active:cursor-grabbing bg-carbon-900/40"
-        />
+      {/* Main Graph Area */}
+      <div className="flex-1 flex min-h-0 relative overflow-hidden bg-gradient-to-br from-carbon-950 via-carbon-900 to-carbon-950">
+        {/* Dedicated Canvas Container with min-w-0 to prevent flex crush */}
+        <div ref={containerRef} className="flex-1 min-w-0 h-full relative overflow-hidden">
+          <canvas 
+            ref={canvasRef}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+            onWheel={handleWheel}
+            className="w-full h-full block cursor-grab active:cursor-grabbing"
+          />
 
-        {/* Dynamic Nodes Count Stats Overlay */}
-        <div className="absolute top-4 left-4 flex flex-col gap-1.5 bg-carbon-850/90 backdrop-blur border border-carbon-700 rounded p-3 text-xs select-none shadow-sm">
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-indigo-500"></span>
-            <span>Target: 1</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
-            <span>Endpoints: {nodes.filter(n => n.type === 'endpoint').length}</span>
-          </div>
-          {showParams && (
+          {/* Top-Left Cyber Stats Floating Badge */}
+          <div className="absolute top-3 left-3 flex flex-col gap-1.5 bg-carbon-950/85 backdrop-blur-md border border-carbon-700/80 rounded-xl p-3 text-xs select-none shadow-2xl">
             <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
-              <span>Parameters: {nodes.filter(n => n.type === 'param').length}</span>
+              <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 shadow-[0_0_8px_#8b5cf6]"></span>
+              <span className="text-carbon-300 font-medium text-[11px]">Target: <b className="text-carbon-100">1</b></span>
             </div>
-          )}
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse"></span>
-            <span className="text-rose-500 font-bold">Findings: {nodes.filter(n => n.type === 'finding').length}</span>
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-sky-400 shadow-[0_0_8px_#38bdf8]"></span>
+              <span className="text-carbon-300 font-medium text-[11px]">Endpoints: <b className="text-carbon-100">{endpointCount}</b></span>
+            </div>
+            {showParams && (
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-400 shadow-[0_0_8px_#fbbf24]"></span>
+                <span className="text-carbon-300 font-medium text-[11px]">Parameters: <b className="text-carbon-100">{paramCount}</b></span>
+              </div>
+            )}
+            <div className="flex items-center gap-2 pt-1 border-t border-carbon-800">
+              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shadow-[0_0_10px_#f43f5e] animate-pulse"></span>
+              <span className="text-rose-300 font-bold text-[11px]">Findings: <b>{findingCount}</b></span>
+            </div>
+          </div>
+
+          {/* Bottom-Left Floating Zoom & Physics Controls */}
+          <div className="absolute bottom-3 left-3 flex items-center gap-1.5 bg-carbon-950/85 backdrop-blur-md border border-carbon-700/80 rounded-lg p-1 text-xs shadow-xl">
+            <button 
+              type="button"
+              onClick={zoomIn}
+              title="Zoom In"
+              className="w-7 h-7 rounded flex items-center justify-center bg-carbon-800 hover:bg-carbon-700 text-carbon-200 font-bold"
+            >
+              +
+            </button>
+            <button 
+              type="button"
+              onClick={zoomOut}
+              title="Zoom Out"
+              className="w-7 h-7 rounded flex items-center justify-center bg-carbon-800 hover:bg-carbon-700 text-carbon-200 font-bold"
+            >
+              −
+            </button>
+            <button 
+              type="button"
+              onClick={resetTransform}
+              title="Fit / Center View"
+              className="px-2.5 h-7 rounded flex items-center justify-center bg-carbon-800 hover:bg-carbon-700 text-carbon-300 text-[11px] font-medium"
+            >
+              ⛶ Center
+            </button>
+            <button 
+              type="button"
+              onClick={() => setIsPhysicsActive(!isPhysicsActive)}
+              title={isPhysicsActive ? "Pause Physics" : "Resume Physics"}
+              className={`px-2.5 h-7 rounded flex items-center justify-center text-[11px] font-medium transition-colors ${
+                isPhysicsActive 
+                  ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-300' 
+                  : 'bg-amber-500/15 border border-amber-500/30 text-amber-300'
+              }`}
+            >
+              {isPhysicsActive ? '⚡ Physics Live' : '⏸️ Paused'}
+            </button>
           </div>
         </div>
 
-        {/* Node Metadata Inspector Panel */}
-        <div className="w-[300px] bg-carbon-850/50 border-l border-carbon-700 p-5 overflow-y-auto text-xs flex flex-col gap-4">
-          <h3 className="font-semibold text-carbon-400 uppercase tracking-wider text-[10px] border-b border-carbon-700 pb-2">
-            Node Inspector
-          </h3>
-          {selectedNode ? (
-            <div className="space-y-4">
-              <div>
-                <div className="text-[10px] text-carbon-500 font-semibold uppercase">Type</div>
-                <div className="text-sm font-bold capitalize mt-0.5 text-carbon-100">{selectedNode.type}</div>
+        {/* Node Metadata Inspector Sidebar with shrink-0 and clean padding */}
+        {isSidebarOpen && (
+          <div className="w-72 sm:w-80 shrink-0 bg-carbon-950/90 backdrop-blur-xl border-l border-carbon-700/80 p-4 sm:p-5 overflow-y-auto text-xs flex flex-col gap-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-carbon-800 pb-3">
+              <h3 className="font-bold text-carbon-300 uppercase tracking-widest text-[10px] flex items-center gap-1.5">
+                <span>🔍</span> Attack Surface Inspector
+              </h3>
+              <div className="flex items-center gap-2">
+                {selectedNode && (
+                  <button 
+                    onClick={() => setSelectedNode(null)} 
+                    className="text-[10px] text-carbon-400 hover:text-carbon-200"
+                  >
+                    Clear
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setIsSidebarOpen(false)}
+                  className="text-carbon-400 hover:text-carbon-100 p-0.5"
+                  title="Close Inspector"
+                >
+                  ✕
+                </button>
               </div>
-              
-              {selectedNode.type === 'target' && (
-                <div>
-                  <div className="text-[10px] text-carbon-500 font-semibold uppercase">Root Domain</div>
-                  <div className="text-xs font-mono font-bold mt-1 bg-carbon-850 border border-carbon-700 p-2 rounded text-brand-300 break-all shadow-sm">
-                    {selectedNode.label}
-                  </div>
-                </div>
-              )}
+            </div>
 
-              {selectedNode.type === 'endpoint' && (
-                <div className="space-y-3">
-                  <div>
-                    <div className="text-[10px] text-carbon-500 font-semibold uppercase">HTTP Method</div>
-                    <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold mt-1 ${
-                      selectedNode.method === 'POST' ? 'bg-rose-500/15 border border-rose-500/30 text-rose-300' : 'bg-brand-500/15 border border-brand-500/30 text-brand-200'
-                    }`}>
-                      {selectedNode.method}
-                    </span>
-                  </div>
-                  <div>
-                    <div className="text-[10px] text-carbon-500 font-semibold uppercase">URL Pattern</div>
-                    <div className="text-xs font-mono mt-1 bg-carbon-850 border border-carbon-700 p-2 rounded text-carbon-300 break-all select-all shadow-sm">
+            {selectedNode ? (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-[10px] text-carbon-500 font-bold uppercase tracking-wider">Node Type</div>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                    selectedNode.type === 'finding' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' :
+                    selectedNode.type === 'endpoint' ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30' :
+                    selectedNode.type === 'param' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
+                    'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
+                  }`}>
+                    {selectedNode.type}
+                  </span>
+                </div>
+                
+                {selectedNode.type === 'target' && (
+                  <div className="space-y-2">
+                    <div className="text-[10px] text-carbon-500 font-bold uppercase">Root Domain</div>
+                    <div className="text-xs font-mono font-bold bg-carbon-900 border border-carbon-700/80 p-2.5 rounded-lg text-brand-300 break-all shadow-inner select-all">
                       {selectedNode.label}
                     </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {selectedNode.type === 'param' && (
-                <div className="space-y-3">
-                  <div>
-                    <div className="text-[10px] text-carbon-500 font-semibold uppercase">Parameter Name</div>
-                    <div className="text-sm font-bold text-amber-300 mt-0.5 font-mono">{selectedNode.name}</div>
+                {selectedNode.type === 'endpoint' && (
+                  <div className="space-y-3">
+                    <div>
+                      <div className="text-[10px] text-carbon-500 font-bold uppercase">HTTP Method</div>
+                      <span className={`inline-block px-2.5 py-0.5 rounded text-[11px] font-mono font-bold mt-1 shadow-sm ${
+                        selectedNode.method === 'POST' 
+                          ? 'bg-rose-500/20 border border-rose-500/40 text-rose-300' 
+                          : 'bg-sky-500/20 border border-sky-500/40 text-sky-300'
+                      }`}>
+                        {selectedNode.method}
+                      </span>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-carbon-500 font-bold uppercase">URL Pattern</div>
+                      <div className="text-xs font-mono mt-1 bg-carbon-900 border border-carbon-700/80 p-2.5 rounded-lg text-carbon-200 break-all select-all shadow-inner">
+                        {selectedNode.label}
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <div className="text-[10px] text-carbon-500 font-semibold uppercase">Submission Location</div>
-                    <span className="inline-block px-2 py-0.5 rounded bg-carbon-850 border border-carbon-700 text-[10px] font-bold text-carbon-400 mt-1 capitalize shadow-sm">
-                      {selectedNode.location}
-                    </span>
-                  </div>
-                </div>
-              )}
+                )}
 
-              {selectedNode.type === 'finding' && (
-                <div className="space-y-3">
-                  <div>
-                    <div className="text-[10px] text-carbon-500 font-semibold uppercase">Security Severity</div>
-                    <span className="inline-block px-2 py-0.5 rounded bg-rose-50 border border-rose-100 text-[10px] font-bold text-rose-500 mt-1 uppercase shadow-sm">
-                      {selectedNode.severity}
-                    </span>
-                  </div>
-                  <div>
-                    <div className="text-[10px] text-carbon-500 font-semibold uppercase">Vulnerability Type</div>
-                    <div className="text-xs font-semibold mt-1 text-brand-300">
-                      {(selectedNode.vuln_type || 'xss').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                {selectedNode.type === 'param' && (
+                  <div className="space-y-3">
+                    <div>
+                      <div className="text-[10px] text-carbon-500 font-bold uppercase">Parameter Name</div>
+                      <div className="text-sm font-bold text-amber-300 mt-1 font-mono bg-carbon-900 border border-carbon-700/80 p-2 rounded-lg select-all break-all">
+                        {selectedNode.name}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-carbon-500 font-bold uppercase">Parameter Location</div>
+                      <span className="inline-block px-2.5 py-0.5 rounded bg-carbon-800 border border-carbon-700 text-[10px] font-bold text-carbon-300 mt-1 uppercase">
+                        {selectedNode.location}
+                      </span>
                     </div>
                   </div>
-                  <div>
-                    <div className="text-[10px] text-carbon-500 font-semibold uppercase">Trigger Parameter</div>
-                    <div className="text-xs font-mono font-bold mt-1 bg-carbon-850 border border-carbon-700 p-2 rounded text-carbon-300 shadow-sm">
-                      {selectedNode.param_name || 'Controllable input'}
+                )}
+
+                {selectedNode.type === 'finding' && (
+                  <div className="space-y-3">
+                    <div>
+                      <div className="text-[10px] text-carbon-500 font-bold uppercase">Severity</div>
+                      <span className="inline-block px-2.5 py-0.5 rounded bg-rose-500/20 border border-rose-500/40 text-[11px] font-bold text-rose-300 mt-1 uppercase">
+                        {selectedNode.severity}
+                      </span>
                     </div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] text-carbon-500 font-semibold uppercase font-bold text-rose-500">Trigger Payload (PoC)</div>
-                    <div className="text-[11px] font-mono mt-1 bg-rose-50/50 border border-rose-100 p-2.5 rounded text-rose-600 break-all select-all whitespace-pre-wrap shadow-sm">
-                      {selectedNode.payload || 'Browser trigger check'}
+                    <div>
+                      <div className="text-[10px] text-carbon-500 font-bold uppercase">Vulnerability Type</div>
+                      <div className="text-xs font-bold mt-1 text-brand-300">
+                        {(selectedNode.vuln_type || 'xss').replace(/_/g, ' ').toUpperCase()}
+                      </div>
                     </div>
+                    {selectedNode.payload && (
+                      <div>
+                        <div className="text-[10px] text-carbon-500 font-bold uppercase">Verified Payload</div>
+                        <div className="text-xs font-mono mt-1 bg-rose-950/30 border border-rose-900/60 p-2.5 rounded-lg text-rose-200 break-all select-all font-semibold">
+                          {selectedNode.payload}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="text-carbon-500 italic text-center py-10">
-              Click any node in the graph to inspect detailed structural parameters and proof artifacts.
-            </div>
-          )}
-        </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex-1 flex flex-col items-center justify-center text-center p-4 text-carbon-500 gap-2">
+                <div className="text-2xl opacity-60">🎯</div>
+                <p className="text-[11px] leading-relaxed">
+                  Click or drag any node on the canvas to inspect attack surface parameters, method specs, and verified payloads.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

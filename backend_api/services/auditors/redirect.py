@@ -5,11 +5,13 @@ from typing import Any, Dict, Iterable, List, Optional
 import httpx
 from sqlalchemy.orm import Session
 
+from backend_api.config import settings
 from backend_api.models.endpoint import Endpoint
 from backend_api.models.param import Param
 from backend_api.models.finding import Finding, FindingStatus, Severity
 from backend_api.utils.logger import logger
 from backend_api.utils.request_builder import RequestBuilder
+from backend_api.utils.rate_limiter import rate_limited_call
 
 class RedirectAuditor:
     """Detect Open Redirect and protocol scheme hijacking (escalating to DOM XSS)."""
@@ -84,12 +86,20 @@ class RedirectAuditor:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
         }
-        if endpoint.auth_context and isinstance(endpoint.auth_context, dict):
-            headers.update(endpoint.auth_context)
+        from backend_api.utils.stealth import get_http_proxy_kwargs
+        proxy_kwargs = get_http_proxy_kwargs(rotated=True)
 
         try:
-            with httpx.Client(timeout=httpx.Timeout(2.5, connect=1.5), verify=False, follow_redirects=False) as client:
-                res = client.get(target_url, headers=headers)
+            with httpx.Client(
+                timeout=httpx.Timeout(2.5, connect=1.5),
+                verify=not settings.ALLOW_INSECURE_TLS,
+                follow_redirects=False,
+                **proxy_kwargs,
+            ) as client:
+                res = rate_limited_call(
+                    target_url,
+                    lambda: client.get(target_url, headers=headers),
+                )
                 loc = res.headers.get("Location", "")
                 if loc:
                     parsed_loc = urllib.parse.urlparse(loc)

@@ -1,0 +1,849 @@
+{
+  "timestamp": "2026-09-04T18:55:54",
+  "elapsed_seconds": 0.9173502922058105,
+  "all_passed": true,
+  "benchmarks": [
+    {
+      "benchmark": "Context Classifier Accuracy",
+      "total_samples": 50,
+      "correct": 50,
+      "accuracy": 100.0,
+      "target_accuracy": 90.0,
+      "passed": true,
+      "elapsed_seconds": 0.004011392593383789,
+      "per_type_metrics": {
+        "HTML_TEXT": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "tp": 8,
+          "fp": 0,
+          "fn": 0
+        },
+        "ATTR_QUOTED": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "tp": 10,
+          "fp": 0,
+          "fn": 0
+        },
+        "ATTR_UNQUOTED": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "tp": 1,
+          "fp": 0,
+          "fn": 0
+        },
+        "EVENT_HANDLER_ATTR": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "tp": 4,
+          "fp": 0,
+          "fn": 0
+        },
+        "HTML_COMMENT": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "tp": 2,
+          "fp": 0,
+          "fn": 0
+        },
+        "JS_STRING_LITERAL": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "tp": 5,
+          "fp": 0,
+          "fn": 0
+        },
+        "JS_TEMPLATE_LITERAL": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "tp": 1,
+          "fp": 0,
+          "fn": 0
+        },
+        "JSON_IN_SCRIPT": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "tp": 1,
+          "fp": 0,
+          "fn": 0
+        },
+        "CSS_STYLE_BLOCK": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "tp": 2,
+          "fp": 0,
+          "fn": 0
+        },
+        "CSS_INLINE_STYLE": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "tp": 1,
+          "fp": 0,
+          "fn": 0
+        },
+        "URL_QUERY": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "tp": 2,
+          "fp": 0,
+          "fn": 0
+        },
+        "HTML_RCDATA": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "tp": 2,
+          "fp": 0,
+          "fn": 0
+        },
+        "SVG_TEXT": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "tp": 1,
+          "fp": 0,
+          "fn": 0
+        },
+        "SVG_SCRIPT": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "tp": 1,
+          "fp": 0,
+          "fn": 0
+        },
+        "MATHML_TEXT": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "tp": 2,
+          "fp": 0,
+          "fn": 0
+        },
+        "ANNOTATION_XML": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "tp": 1,
+          "fp": 0,
+          "fn": 0
+        },
+        "CSTI_ANGULAR": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "tp": 1,
+          "fp": 0,
+          "fn": 0
+        },
+        "CSTI_VUE": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "tp": 1,
+          "fp": 0,
+          "fn": 0
+        },
+        "SRC_DOC_ATTR": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "tp": 1,
+          "fp": 0,
+          "fn": 0
+        },
+        "HTML_RAW_TEXT": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "tp": 1,
+          "fp": 0,
+          "fn": 0
+        },
+        "JS_COMMENT": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "tp": 2,
+          "fp": 0,
+          "fn": 0
+        }
+      },
+      "details": [
+        {
+          "sample": "CTX-01",
+          "expected_context": "HTML_TEXT",
+          "detected_context": "HTML_TEXT",
+          "expected_tag": "div",
+          "detected_tag": "div",
+          "match": true,
+          "description": "Basic HTML text node inside div"
+        },
+        {
+          "sample": "CTX-02",
+          "expected_context": "HTML_TEXT",
+          "detected_context": "HTML_TEXT",
+          "expected_tag": "p",
+          "detected_tag": "p",
+          "match": true,
+          "description": "HTML text inside paragraph"
+        },
+        {
+          "sample": "CTX-03",
+          "expected_context": "HTML_TEXT",
+          "detected_context": "HTML_TEXT",
+          "expected_tag": "span",
+          "detected_tag": "span",
+          "match": true,
+          "description": "HTML text inside span"
+        },
+        {
+          "sample": "CTX-04",
+          "expected_context": "HTML_TEXT",
+          "detected_context": "HTML_TEXT",
+          "expected_tag": "li",
+          "detected_tag": "li",
+          "match": true,
+          "description": "HTML text inside list item"
+        },
+        {
+          "sample": "CTX-05",
+          "expected_context": "ATTR_QUOTED",
+          "detected_context": "ATTR_QUOTED",
+          "expected_tag": "input",
+          "detected_tag": "input",
+          "match": true,
+          "description": "Double-quoted attribute value"
+        },
+        {
+          "sample": "CTX-06",
+          "expected_context": "ATTR_QUOTED",
+          "detected_context": "ATTR_QUOTED",
+          "expected_tag": "input",
+          "detected_tag": "input",
+          "match": true,
+          "description": "Single-quoted attribute value"
+        },
+        {
+          "sample": "CTX-07",
+          "expected_context": "ATTR_QUOTED",
+          "detected_context": "ATTR_QUOTED",
+          "expected_tag": "a",
+          "detected_tag": "a",
+          "match": true,
+          "description": "Quoted href attribute"
+        },
+        {
+          "sample": "CTX-08",
+          "expected_context": "ATTR_QUOTED",
+          "detected_context": "ATTR_QUOTED",
+          "expected_tag": "img",
+          "detected_tag": "img",
+          "match": true,
+          "description": "Quoted src attribute on img"
+        },
+        {
+          "sample": "CTX-09",
+          "expected_context": "ATTR_UNQUOTED",
+          "detected_context": "ATTR_UNQUOTED",
+          "expected_tag": "img",
+          "detected_tag": "img",
+          "match": true,
+          "description": "Unquoted data attribute"
+        },
+        {
+          "sample": "CTX-10",
+          "expected_context": "EVENT_HANDLER_ATTR",
+          "detected_context": "EVENT_HANDLER_ATTR",
+          "expected_tag": "div",
+          "detected_tag": "div",
+          "match": true,
+          "description": "onclick event handler attribute"
+        },
+        {
+          "sample": "CTX-11",
+          "expected_context": "EVENT_HANDLER_ATTR",
+          "detected_context": "EVENT_HANDLER_ATTR",
+          "expected_tag": "img",
+          "detected_tag": "img",
+          "match": true,
+          "description": "onerror event handler attribute"
+        },
+        {
+          "sample": "CTX-12",
+          "expected_context": "EVENT_HANDLER_ATTR",
+          "detected_context": "EVENT_HANDLER_ATTR",
+          "expected_tag": "body",
+          "detected_tag": "body",
+          "match": true,
+          "description": "onload event handler"
+        },
+        {
+          "sample": "CTX-13",
+          "expected_context": "HTML_COMMENT",
+          "detected_context": "HTML_COMMENT",
+          "expected_tag": null,
+          "detected_tag": null,
+          "match": true,
+          "description": "HTML comment context"
+        },
+        {
+          "sample": "CTX-14",
+          "expected_context": "HTML_COMMENT",
+          "detected_context": "HTML_COMMENT",
+          "expected_tag": null,
+          "detected_tag": null,
+          "match": true,
+          "description": "HTML comment before content"
+        },
+        {
+          "sample": "CTX-15",
+          "expected_context": "JS_STRING_LITERAL",
+          "detected_context": "JS_STRING_LITERAL",
+          "expected_tag": null,
+          "detected_tag": "script",
+          "match": true,
+          "description": "JS double-quoted string in script block"
+        },
+        {
+          "sample": "CTX-16",
+          "expected_context": "JS_STRING_LITERAL",
+          "detected_context": "JS_STRING_LITERAL",
+          "expected_tag": null,
+          "detected_tag": "script",
+          "match": true,
+          "description": "JS single-quoted string in script block"
+        },
+        {
+          "sample": "CTX-17",
+          "expected_context": "JS_STRING_LITERAL",
+          "detected_context": "JS_STRING_LITERAL",
+          "expected_tag": null,
+          "detected_tag": "script",
+          "match": true,
+          "description": "JS string inside function call"
+        },
+        {
+          "sample": "CTX-18",
+          "expected_context": "JS_TEMPLATE_LITERAL",
+          "detected_context": "JS_TEMPLATE_LITERAL",
+          "expected_tag": null,
+          "detected_tag": "script",
+          "match": true,
+          "description": "JS template literal with backticks"
+        },
+        {
+          "sample": "CTX-19",
+          "expected_context": "JSON_IN_SCRIPT",
+          "detected_context": "JSON_IN_SCRIPT",
+          "expected_tag": null,
+          "detected_tag": "script",
+          "match": true,
+          "description": "JSON inside script type=application/json"
+        },
+        {
+          "sample": "CTX-20",
+          "expected_context": "CSS_STYLE_BLOCK",
+          "detected_context": "CSS_STYLE_BLOCK",
+          "expected_tag": null,
+          "detected_tag": "style",
+          "match": true,
+          "description": "CSS property value in style block"
+        },
+        {
+          "sample": "CTX-21",
+          "expected_context": "CSS_STYLE_BLOCK",
+          "detected_context": "CSS_STYLE_BLOCK",
+          "expected_tag": null,
+          "detected_tag": "style",
+          "match": true,
+          "description": "CSS property value (unquoted) in style block"
+        },
+        {
+          "sample": "CTX-22",
+          "expected_context": "CSS_INLINE_STYLE",
+          "detected_context": "CSS_INLINE_STYLE",
+          "expected_tag": "div",
+          "detected_tag": "div",
+          "match": true,
+          "description": "Inline style attribute"
+        },
+        {
+          "sample": "CTX-23",
+          "expected_context": "URL_QUERY",
+          "detected_context": "URL_QUERY",
+          "expected_tag": "a",
+          "detected_tag": "a",
+          "match": true,
+          "description": "URL query parameter in href"
+        },
+        {
+          "sample": "CTX-24",
+          "expected_context": "URL_QUERY",
+          "detected_context": "URL_QUERY",
+          "expected_tag": "form",
+          "detected_tag": "form",
+          "match": true,
+          "description": "URL query parameter in form action"
+        },
+        {
+          "sample": "CTX-25",
+          "expected_context": "HTML_RCDATA",
+          "detected_context": "HTML_RCDATA",
+          "expected_tag": "title",
+          "detected_tag": "title",
+          "match": true,
+          "description": "Title RCDATA context"
+        },
+        {
+          "sample": "CTX-26",
+          "expected_context": "HTML_RCDATA",
+          "detected_context": "HTML_RCDATA",
+          "expected_tag": "textarea",
+          "detected_tag": "textarea",
+          "match": true,
+          "description": "Textarea RCDATA context"
+        },
+        {
+          "sample": "CTX-27",
+          "expected_context": "SVG_TEXT",
+          "detected_context": "SVG_TEXT",
+          "expected_tag": "text",
+          "detected_tag": "text",
+          "match": true,
+          "description": "SVG text element"
+        },
+        {
+          "sample": "CTX-28",
+          "expected_context": "SVG_SCRIPT",
+          "detected_context": "SVG_SCRIPT",
+          "expected_tag": "script",
+          "detected_tag": "script",
+          "match": true,
+          "description": "SVG script element"
+        },
+        {
+          "sample": "CTX-29",
+          "expected_context": "MATHML_TEXT",
+          "detected_context": "MATHML_TEXT",
+          "expected_tag": "mtext",
+          "detected_tag": "mtext",
+          "match": true,
+          "description": "MathML mtext element"
+        },
+        {
+          "sample": "CTX-30",
+          "expected_context": "ANNOTATION_XML",
+          "detected_context": "ANNOTATION_XML",
+          "expected_tag": "annotation-xml",
+          "detected_tag": "annotation-xml",
+          "match": true,
+          "description": "MathML annotation-xml with text/html encoding"
+        },
+        {
+          "sample": "CTX-31",
+          "expected_context": "CSTI_ANGULAR",
+          "detected_context": "CSTI_ANGULAR",
+          "expected_tag": null,
+          "detected_tag": null,
+          "match": true,
+          "description": "Angular template expression"
+        },
+        {
+          "sample": "CTX-32",
+          "expected_context": "CSTI_VUE",
+          "detected_context": "CSTI_VUE",
+          "expected_tag": "div",
+          "detected_tag": "div",
+          "match": true,
+          "description": "Vue v-html directive"
+        },
+        {
+          "sample": "CTX-33",
+          "expected_context": "HTML_TEXT",
+          "detected_context": "HTML_TEXT",
+          "expected_tag": "div",
+          "detected_tag": "div",
+          "match": true,
+          "description": "HTML text before script block"
+        },
+        {
+          "sample": "CTX-34",
+          "expected_context": "ATTR_QUOTED",
+          "detected_context": "ATTR_QUOTED",
+          "expected_tag": "input",
+          "detected_tag": "input",
+          "match": true,
+          "description": "Hidden input value attribute"
+        },
+        {
+          "sample": "CTX-35",
+          "expected_context": "ATTR_QUOTED",
+          "detected_context": "ATTR_QUOTED",
+          "expected_tag": "meta",
+          "detected_tag": "meta",
+          "match": true,
+          "description": "Meta tag content attribute"
+        },
+        {
+          "sample": "CTX-36",
+          "expected_context": "JS_STRING_LITERAL",
+          "detected_context": "JS_STRING_LITERAL",
+          "expected_tag": null,
+          "detected_tag": "script",
+          "match": true,
+          "description": "JS object literal string value"
+        },
+        {
+          "sample": "CTX-37",
+          "expected_context": "ATTR_QUOTED",
+          "detected_context": "ATTR_QUOTED",
+          "expected_tag": "div",
+          "detected_tag": "div",
+          "match": true,
+          "description": "JSON inside single-quoted data attribute"
+        },
+        {
+          "sample": "CTX-38",
+          "expected_context": "SRC_DOC_ATTR",
+          "detected_context": "SRC_DOC_ATTR",
+          "expected_tag": "iframe",
+          "detected_tag": "iframe",
+          "match": true,
+          "description": "srcdoc attribute (double HTML decoding)"
+        },
+        {
+          "sample": "CTX-39",
+          "expected_context": "HTML_TEXT",
+          "detected_context": "HTML_TEXT",
+          "expected_tag": "div",
+          "detected_tag": "div",
+          "match": true,
+          "description": "HTML inside SVG foreignObject"
+        },
+        {
+          "sample": "CTX-40",
+          "expected_context": "MATHML_TEXT",
+          "detected_context": "MATHML_TEXT",
+          "expected_tag": "span",
+          "detected_tag": "span",
+          "match": true,
+          "description": "HTML inside MathML mtext"
+        },
+        {
+          "sample": "CTX-41",
+          "expected_context": "HTML_TEXT",
+          "detected_context": "HTML_TEXT",
+          "expected_tag": null,
+          "detected_tag": "div",
+          "match": true,
+          "description": "Multiple reflections \u2014 first should be HTML_TEXT"
+        },
+        {
+          "sample": "CTX-42",
+          "expected_context": "JS_STRING_LITERAL",
+          "detected_context": "JS_STRING_LITERAL",
+          "expected_tag": null,
+          "detected_tag": "script",
+          "match": true,
+          "description": "Multiple JS string reflections"
+        },
+        {
+          "sample": "CTX-43",
+          "expected_context": "HTML_RAW_TEXT",
+          "detected_context": "HTML_RAW_TEXT",
+          "expected_tag": "xmp",
+          "detected_tag": "xmp",
+          "match": true,
+          "description": "XMP raw text context"
+        },
+        {
+          "sample": "CTX-44",
+          "expected_context": "JS_COMMENT",
+          "detected_context": "JS_COMMENT",
+          "expected_tag": null,
+          "detected_tag": "script",
+          "match": true,
+          "description": "JS single-line comment"
+        },
+        {
+          "sample": "CTX-45",
+          "expected_context": "JS_COMMENT",
+          "detected_context": "JS_COMMENT",
+          "expected_tag": null,
+          "detected_tag": "script",
+          "match": true,
+          "description": "JS multi-line comment"
+        },
+        {
+          "sample": "CTX-46",
+          "expected_context": "ATTR_QUOTED",
+          "detected_context": "ATTR_QUOTED",
+          "expected_tag": "link",
+          "detected_tag": "link",
+          "match": true,
+          "description": "Link tag href attribute"
+        },
+        {
+          "sample": "CTX-47",
+          "expected_context": "ATTR_QUOTED",
+          "detected_context": "ATTR_QUOTED",
+          "expected_tag": "source",
+          "detected_tag": "source",
+          "match": true,
+          "description": "Source tag src attribute"
+        },
+        {
+          "sample": "CTX-48",
+          "expected_context": "ATTR_QUOTED",
+          "detected_context": "ATTR_QUOTED",
+          "expected_tag": "button",
+          "detected_tag": "button",
+          "match": true,
+          "description": "Button formaction attribute"
+        },
+        {
+          "sample": "CTX-49",
+          "expected_context": "HTML_TEXT",
+          "detected_context": "HTML_TEXT",
+          "expected_tag": "span",
+          "detected_tag": "span",
+          "match": true,
+          "description": "Deeply nested HTML text"
+        },
+        {
+          "sample": "CTX-50",
+          "expected_context": "EVENT_HANDLER_ATTR",
+          "detected_context": "EVENT_HANDLER_ATTR",
+          "expected_tag": "td",
+          "detected_tag": "td",
+          "match": true,
+          "description": "Event handler in table cell"
+        }
+      ]
+    },
+    {
+      "benchmark": "False-Positive Discipline",
+      "total_endpoints": 15,
+      "false_positives": 0,
+      "fp_rate": 0.0,
+      "target_fp_rate": 0.0,
+      "passed": true,
+      "elapsed_seconds": 0.024016857147216797,
+      "details": [
+        {
+          "endpoint": "FP-01: html.escape() in HTML text",
+          "defense_category": "encoding",
+          "contexts_detected": 1,
+          "false_positive": false,
+          "fp_payload": null
+        },
+        {
+          "endpoint": "FP-02: html.escape() in attribute",
+          "defense_category": "encoding",
+          "contexts_detected": 1,
+          "false_positive": false,
+          "fp_payload": null
+        },
+        {
+          "endpoint": "FP-03: json.dumps() with script close neutralization",
+          "defense_category": "encoding",
+          "contexts_detected": 1,
+          "false_positive": false,
+          "fp_payload": null
+        },
+        {
+          "endpoint": "FP-04: URL-encoded output in href",
+          "defense_category": "encoding",
+          "contexts_detected": 1,
+          "false_positive": false,
+          "fp_payload": null
+        },
+        {
+          "endpoint": "FP-05: Double HTML-entity encoding",
+          "defense_category": "encoding",
+          "contexts_detected": 1,
+          "false_positive": false,
+          "fp_payload": null
+        },
+        {
+          "endpoint": "FP-06: textContent assignment",
+          "defense_category": "safe_sink",
+          "contexts_detected": 1,
+          "false_positive": false,
+          "fp_payload": null
+        },
+        {
+          "endpoint": "FP-07: innerText assignment",
+          "defense_category": "safe_sink",
+          "contexts_detected": 1,
+          "false_positive": false,
+          "fp_payload": null
+        },
+        {
+          "endpoint": "FP-08: textarea RCDATA reflection",
+          "defense_category": "safe_sink",
+          "contexts_detected": 1,
+          "false_positive": false,
+          "fp_payload": null
+        },
+        {
+          "endpoint": "FP-09: title RCDATA reflection",
+          "defense_category": "safe_sink",
+          "contexts_detected": 1,
+          "false_positive": false,
+          "fp_payload": null
+        },
+        {
+          "endpoint": "FP-10: Strict CSP with nonce (no unsafe-inline)",
+          "defense_category": "csp",
+          "contexts_detected": 1,
+          "false_positive": false,
+          "fp_payload": null
+        },
+        {
+          "endpoint": "FP-11: application/json Content-Type",
+          "defense_category": "content_type",
+          "contexts_detected": 2,
+          "false_positive": false,
+          "fp_payload": null
+        },
+        {
+          "endpoint": "FP-12: text/plain Content-Type",
+          "defense_category": "content_type",
+          "contexts_detected": 1,
+          "false_positive": false,
+          "fp_payload": null
+        },
+        {
+          "endpoint": "FP-13: DOMPurify-sanitized innerHTML",
+          "defense_category": "sanitizer",
+          "contexts_detected": 1,
+          "false_positive": false,
+          "fp_payload": null
+        },
+        {
+          "endpoint": "FP-14: Jinja2 autoescaped output",
+          "defense_category": "encoding",
+          "contexts_detected": 1,
+          "false_positive": false,
+          "fp_payload": null
+        },
+        {
+          "endpoint": "FP-15: Cookie value in HTTP-only cookie header (not in HTML)",
+          "defense_category": "content_type",
+          "contexts_detected": 0,
+          "false_positive": false,
+          "fp_payload": null
+        }
+      ]
+    },
+    {
+      "naive_solved": 1,
+      "xssboss_solved": 5,
+      "total_challenges": 5,
+      "naive_success_rate": 20.0,
+      "xssboss_success_rate": 100.0,
+      "naive_avg_attempts": 49.6,
+      "xssboss_avg_attempts": 1.0,
+      "naive_details": [
+        {
+          "strategy": "Baseline Naive Fuzzer",
+          "challenge": "1. Attribute Breakout (Angle Brackets Filtered)",
+          "solved": true,
+          "attempts": 8,
+          "elapsed_seconds": 0.0,
+          "winning_payload": "\" onfocus=alert(PROBE_TOKEN_BENCHMARK) autofocus=\""
+        },
+        {
+          "strategy": "Baseline Naive Fuzzer",
+          "challenge": "2. JS String Literal Breakout (Quotes Sanitized, Tag Close Allowed)",
+          "solved": false,
+          "attempts": 60,
+          "elapsed_seconds": 0.0,
+          "winning_payload": null
+        },
+        {
+          "strategy": "Baseline Naive Fuzzer",
+          "challenge": "3. HTML Comment Breakout",
+          "solved": false,
+          "attempts": 60,
+          "elapsed_seconds": 0.0,
+          "winning_payload": null
+        },
+        {
+          "strategy": "Baseline Naive Fuzzer",
+          "challenge": "4. Keyword Filter Evasion (alert/onerror/script blocked)",
+          "solved": false,
+          "attempts": 60,
+          "elapsed_seconds": 0.0,
+          "winning_payload": null
+        },
+        {
+          "strategy": "Baseline Naive Fuzzer",
+          "challenge": "5. Complex Mixed Context (Style Tag with Quote Filter)",
+          "solved": false,
+          "attempts": 60,
+          "elapsed_seconds": 0.0,
+          "winning_payload": null
+        }
+      ],
+      "xssboss_details": [
+        {
+          "strategy": "XSSBoss Guided Engine",
+          "challenge": "1. Attribute Breakout (Angle Brackets Filtered)",
+          "solved": true,
+          "attempts": 1,
+          "elapsed_seconds": 0.0,
+          "winning_payload": "\" onfocus=alert(\"PROBE_TOKEN_BENCHMARK\") autofocus=\""
+        },
+        {
+          "strategy": "XSSBoss Guided Engine",
+          "challenge": "2. JS String Literal Breakout (Quotes Sanitized, Tag Close Allowed)",
+          "solved": true,
+          "attempts": 1,
+          "elapsed_seconds": 0.0,
+          "winning_payload": "</script><svg onload=alert(`PROBE_TOKEN_BENCHMARK`)>"
+        },
+        {
+          "strategy": "XSSBoss Guided Engine",
+          "challenge": "3. HTML Comment Breakout",
+          "solved": true,
+          "attempts": 1,
+          "elapsed_seconds": 0.0,
+          "winning_payload": "--><svg onload=alert(\"PROBE_TOKEN_BENCHMARK\")>"
+        },
+        {
+          "strategy": "XSSBoss Guided Engine",
+          "challenge": "4. Keyword Filter Evasion (alert/onerror/script blocked)",
+          "solved": true,
+          "attempts": 1,
+          "elapsed_seconds": 0.00099945068359375,
+          "winning_payload": "<svg onload=confirm(\"PROBE_TOKEN_BENCHMARK\")>"
+        },
+        {
+          "strategy": "XSSBoss Guided Engine",
+          "challenge": "5. Complex Mixed Context (Style Tag with Quote Filter)",
+          "solved": true,
+          "attempts": 1,
+          "elapsed_seconds": 0.0,
+          "winning_payload": "</style><svg onload=confirm(`PROBE_TOKEN_BENCHMARK`)>"
+        }
+      ],
+      "benchmark": "Fuzzer Efficacy",
+      "passed": true
+    }
+  ]
+}

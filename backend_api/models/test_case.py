@@ -14,12 +14,13 @@ class TestCaseStatus(str, enum.Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
+    SKIPPED = "skipped"
 
 
 class TestCase(BaseModel):
     """Test case model."""
     __test__ = False
-    
     __tablename__ = "test_cases"
     
     experiment_id = Column(Integer, ForeignKey("experiments.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -39,6 +40,8 @@ class TestCase(BaseModel):
     lease_expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
     first_claimed_at = Column(DateTime(timezone=True), nullable=True, index=True)
     attempt_count = Column(Integer, default=0, nullable=False)
+    # Atomic one-shot guard for the optional controlled lineage follow-up.
+    runtime_lineage_probe_reserved_at = Column(DateTime(timezone=True), nullable=True)
     research_hypothesis_id = Column(Integer, ForeignKey("research_hypotheses.id", ondelete="SET NULL"), nullable=True, index=True)
     technique = Column(String(80), nullable=True, index=True)
     research_metadata = Column(JSON, nullable=True)

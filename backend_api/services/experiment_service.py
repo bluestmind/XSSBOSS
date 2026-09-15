@@ -13,7 +13,6 @@ class ExperimentService:
     @staticmethod
     def create_experiment(db: Session, experiment_data: dict) -> Experiment:
         """Create a new experiment."""
-        # Verify target exists
         target = db.query(Target).filter(Target.id == experiment_data['target_id']).first()
         if not target:
             raise NotFoundError("Target", experiment_data['target_id'])
@@ -30,6 +29,9 @@ class ExperimentService:
         experiment = db.query(Experiment).filter(Experiment.id == experiment_id).first()
         if not experiment:
             raise NotFoundError("Experiment", experiment_id)
+        if experiment.target:
+            experiment.target_name = experiment.target.name
+            experiment.target_handle = (experiment.target.scope_tags or {}).get("handle", experiment.target.name)
         return experiment
     
     @staticmethod
@@ -38,15 +40,20 @@ class ExperimentService:
         target_id: Optional[int] = None,
         status: Optional[ExperimentStatus] = None,
         skip: int = 0,
-        limit: int = 100
+        limit: int = 200
     ) -> List[Experiment]:
         """List experiments, optionally filtered by target or status."""
-        query = db.query(Experiment)
+        query = db.query(Experiment).order_by(Experiment.id.desc())
         if target_id:
             query = query.filter(Experiment.target_id == target_id)
         if status:
             query = query.filter(Experiment.status == status)
-        return query.offset(skip).limit(limit).all()
+        experiments = query.offset(skip).limit(limit).all()
+        for exp in experiments:
+            if exp.target:
+                exp.target_name = exp.target.name
+                exp.target_handle = (exp.target.scope_tags or {}).get("handle", exp.target.name)
+        return experiments
     
     @staticmethod
     def update_experiment(
@@ -56,15 +63,13 @@ class ExperimentService:
     ) -> Experiment:
         """Update an experiment."""
         experiment = ExperimentService.get_experiment(db, experiment_id)
-        
         for field, value in update_data.items():
             if hasattr(experiment, field):
                 setattr(experiment, field, value)
-        
         db.commit()
         db.refresh(experiment)
         return experiment
-    
+
     @staticmethod
     def start_experiment(db: Session, experiment_id: int) -> Experiment:
         """Start an experiment."""
@@ -73,54 +78,51 @@ class ExperimentService:
         if experiment.status == ExperimentStatus.RUNNING:
             return experiment
             
-        if experiment.status != ExperimentStatus.PENDING:
+        if experiment.status not in (ExperimentStatus.PENDING, ExperimentStatus.PAUSED):
             raise ValidationError(
                 f"Cannot start experiment in status: {experiment.status.value}"
             )
         
         experiment.status = ExperimentStatus.RUNNING
-        experiment.started_at = datetime.now(UTC)
+        experiment.started_at = experiment.started_at or datetime.now(UTC)
         db.commit()
         db.refresh(experiment)
         return experiment
-    
+
     @staticmethod
     def stop_experiment(db: Session, experiment_id: int) -> Experiment:
         """Stop/pause an experiment."""
         experiment = ExperimentService.get_experiment(db, experiment_id)
-        
         if experiment.status != ExperimentStatus.RUNNING:
             raise ValidationError(
                 f"Cannot stop experiment in status: {experiment.status.value}"
             )
-        
         experiment.status = ExperimentStatus.PAUSED
         db.commit()
         db.refresh(experiment)
         return experiment
-    
+
     @staticmethod
     def continue_experiment(db: Session, experiment_id: int) -> Experiment:
         """Continue/resume a paused experiment."""
         experiment = ExperimentService.get_experiment(db, experiment_id)
-        
         if experiment.status != ExperimentStatus.PAUSED:
             raise ValidationError(
                 f"Cannot continue experiment in status: {experiment.status.value}"
             )
-        
         experiment.status = ExperimentStatus.RUNNING
         db.commit()
         db.refresh(experiment)
         return experiment
-    
+
     @staticmethod
     def delete_experiment(db: Session, experiment_id: int) -> None:
         """Delete an experiment."""
-        experiment = ExperimentService.get_experiment(db, experiment_id)
-        db.delete(experiment)
-        db.commit()
-    
+        experiment = db.query(Experiment).filter(Experiment.id == experiment_id).first()
+        if experiment:
+            db.delete(experiment)
+            db.commit()
+
     @staticmethod
     def get_experiment_stats(db: Session, experiment_id: int) -> Dict[str, Any]:
         """Get statistics for an experiment."""
@@ -128,7 +130,6 @@ class ExperimentService:
         
         experiment = ExperimentService.get_experiment(db, experiment_id)
         test_cases = db.query(TestCase).filter(TestCase.experiment_id == experiment_id).all()
-        
         return {
             'total_test_cases': len(test_cases),
             'pending': len([tc for tc in test_cases if tc.status == TestCaseStatus.PENDING]),

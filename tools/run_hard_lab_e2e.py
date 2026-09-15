@@ -13,6 +13,7 @@ import threading
 import time
 import tempfile
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlparse
@@ -163,6 +164,9 @@ def _looks_like_candidate(case: dict, payload: str, token: str) -> bool:
     if not has_token or "__xss__" not in lowered:
         return False
 
+    required = case.get("smoke_all", [])
+    if required:
+        return all(needle.lower() in lowered for needle in required)
     return any(needle.lower() in lowered for needle in case.get("smoke_any", []))
 
 
@@ -188,7 +192,15 @@ def _start_uvicorn(app, host: str, port: int, label: str):
         print("[!] Missing uvicorn. Run setup_backend.bat first.")
         raise SystemExit(1) from exc
 
-    config = uvicorn.Config(app, host=host, port=port, log_level="warning", access_log=False)
+    config = uvicorn.Config(
+        app,
+        host=host,
+        port=port,
+        log_level="warning",
+        access_log=False,
+        timeout_keep_alive=1,
+        timeout_graceful_shutdown=5,
+    )
     server = uvicorn.Server(config)
     thread = threading.Thread(target=server.run, name=label, daemon=True)
     thread.start()
@@ -205,6 +217,9 @@ def _set_env(database_url: str | None, oracle_url: str):
     os.environ["PROXY_URL"] = ""
     os.environ["LLM_ENABLED"] = "False"
     os.environ["USE_BROWSER_CHATGPT"] = "False"
+    # Defensive controls are part of the acceptance contract.  The runner must
+    # observe the target's real CSP/Trusted Types policy rather than stripping it.
+    os.environ["BYPASS_CSP"] = "False"
 
 
 def _candidate_payloads(generator, case: dict, token: str, max_attempts: int):
@@ -262,8 +277,12 @@ def run_e2e(
     target_port = parsed_base.port or 8099
     target_host = parsed_base.hostname or "127.0.0.1"
 
-    _start_uvicorn(hard_app, target_host, target_port, "hard-lab-target")
-    _start_uvicorn(oracle_app, "127.0.0.1", oracle_port, "xss-oracle")
+    hard_server, hard_server_thread = _start_uvicorn(
+        hard_app, target_host, target_port, "hard-lab-target"
+    )
+    oracle_server, oracle_server_thread = _start_uvicorn(
+        oracle_app, "127.0.0.1", oracle_port, "xss-oracle"
+    )
     _wait_for(f"{base_url}/health")
     _wait_for(f"{oracle_url}/health")
 
@@ -285,6 +304,7 @@ def run_e2e(
     generator = PayloadGenerator()
     failures = []
     case_results = []
+    browser_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="hard-lab-browser")
 
     try:
         target = db.query(Target).filter(Target.name == manifest["target"]["name"]).first()
@@ -370,8 +390,6 @@ def run_e2e(
             case_hit = False
             last_test_case_id = None
 
-            from concurrent.futures import ThreadPoolExecutor, as_completed
-
             test_cases_to_run = []
             for attempt_index, candidate in enumerate(candidates, start=1):
                 token = Tokenizer.generate_token()
@@ -385,6 +403,14 @@ def run_e2e(
                     token=token,
                     priority=100 - attempt_index,
                     status=TestCaseStatus.QUEUED,
+                    research_metadata={
+                        "hard_lab_case": case["slug"],
+                        **(
+                            {"fake_message_origin": case["fake_message_origin"]}
+                            if case.get("fake_message_origin")
+                            else {}
+                        ),
+                    },
                 )
                 db.add(test_case)
                 db.commit()
@@ -399,24 +425,50 @@ def run_e2e(
                 from browser_workers.worker import execute_test_case_task
                 res = execute_test_case_task.delay(tc_id)
                 res_val = getattr(res, "result", None)
-                return tc_id, bool(isinstance(res_val, dict) and res_val.get("oracle_hit")), res_val
+                if isinstance(res_val, BaseException):
+                    normalized = {
+                        "status": "error",
+                        "error": {
+                            "type": type(res_val).__name__,
+                            "message": str(res_val),
+                        },
+                    }
+                elif isinstance(res_val, dict):
+                    normalized = res_val
+                else:
+                    normalized = {"status": "error", "error": {"message": repr(res_val)}}
+                return tc_id, bool(normalized.get("oracle_hit")), normalized
 
             max_workers = min(4, len(test_cases_to_run))
             attempt_results = []
             if max_workers > 0:
-                with ThreadPoolExecutor(max_workers=max_workers) as pool:
-                    futures = {pool.submit(run_attempt, tc_id): tc_id for tc_id, _ in test_cases_to_run}
-                    for future in as_completed(futures):
-                        tc_id, oracle_hit, result_value = future.result()
-                        last_test_case_id = tc_id
-                        attempt_results.append({"test_case_id": tc_id, "result": result_value})
-                        if oracle_hit:
-                            case_hit = True
+                futures = {
+                    browser_pool.submit(run_attempt, tc_id): tc_id
+                    for tc_id, _ in test_cases_to_run
+                }
+                for future in as_completed(futures):
+                    tc_id, oracle_hit, result_value = future.result()
+                    last_test_case_id = tc_id
+                    attempt_results.append({"test_case_id": tc_id, "result": result_value})
+                    if oracle_hit:
+                        case_hit = True
 
 
             status = "PASS" if case_hit == expected else "FAIL"
+            infrastructure_errors = [
+                item for item in attempt_results
+                if item["result"].get("status") == "error"
+            ]
+            if infrastructure_errors:
+                status = "FAIL"
+                failures.append((
+                    case["slug"],
+                    f"{len(infrastructure_errors)} browser infrastructure error(s)",
+                    "zero infrastructure errors",
+                ))
             if status == "FAIL":
-                failures.append((case["slug"], f"oracle_hit={case_hit}", expected))
+                if case_hit != expected:
+                    failures.append((case["slug"], f"oracle_hit={case_hit}", expected))
             case_results.append({
                 "slug": case["slug"],
                 "detected": case_hit,
@@ -442,13 +494,31 @@ def run_e2e(
         except Exception as rep_err:
             print(f"[!] Warning: Failed to generate campaign report: {rep_err}")
     finally:
+        # Browser executors are thread-local.  A barrier guarantees that one
+        # cleanup job occupies every thread the persistent pool actually
+        # created, so each owned driver is stopped exactly once.
+        active_workers = len(browser_pool._threads)
+        if active_workers:
+            cleanup_barrier = threading.Barrier(active_workers)
+
+            def stop_worker_browser():
+                cleanup_barrier.wait(timeout=15)
+                from browser_workers.worker import stop_browser_executor
+
+                stop_browser_executor()
+
+            cleanup_futures = [
+                browser_pool.submit(stop_worker_browser)
+                for _ in range(active_workers)
+            ]
+            for cleanup_future in cleanup_futures:
+                cleanup_future.result(timeout=30)
+        browser_pool.shutdown(wait=True)
         db.close()
         try:
-            from browser_workers import worker
+            from browser_workers.worker import stop_browser_executor
 
-            if worker._worker_browser_executor:
-                worker._worker_browser_executor.stop()
-                worker._worker_browser_executor = None
+            stop_browser_executor()
         except Exception:
             pass
         # Windows keeps SQLite files locked while pooled connections remain
@@ -460,6 +530,14 @@ def run_e2e(
             engine.dispose()
         except Exception:
             pass
+        for server, thread in (
+            (oracle_server, oracle_server_thread),
+            (hard_server, hard_server_thread),
+        ):
+            server.should_exit = True
+            thread.join(timeout=10)
+            if thread.is_alive():
+                print(f"[!] Warning: local server thread {thread.name} did not stop cleanly")
 
     from backend_api.quality.accuracy import evaluate_accuracy, passes_accuracy_gate
     evaluated_truth = [
@@ -482,7 +560,13 @@ def run_e2e(
         print(f"[+] Accuracy artifact: {artifact_path}")
 
     print("")
-    if not passes_accuracy_gate(metrics):
+    has_expected_positive = any(case["expected_vulnerable"] for case in evaluated_truth)
+    gate_passed = (
+        passes_accuracy_gate(metrics)
+        if has_expected_positive
+        else metrics.complete and metrics.false_positive == 0 and metrics.false_negative == 0
+    )
+    if not gate_passed:
         failures.append(("accuracy_gate", metrics.as_dict(), True))
     if failures:
         print("[!] Hard lab browser proof failed:")
@@ -491,6 +575,13 @@ def run_e2e(
         return 1
 
     print("[+] Hard lab browser proof passed.")
+    remaining_threads = [
+        (thread.name, thread.daemon)
+        for thread in threading.enumerate()
+        if thread is not threading.main_thread()
+    ]
+    if remaining_threads:
+        print(f"[!] Runtime threads still alive at completion: {remaining_threads}")
     return 0
 
 

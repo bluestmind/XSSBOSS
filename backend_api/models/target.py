@@ -3,6 +3,7 @@ from sqlalchemy import Column, String, Text, JSON, Integer, ForeignKey, Enum as 
 from sqlalchemy.orm import relationship
 import enum
 from .base import BaseModel
+from backend_api.db.encrypted_json import EncryptedJSON
 
 
 class TargetStatus(str, enum.Enum):
@@ -24,7 +25,7 @@ class Target(BaseModel):
     notes = Column(Text, nullable=True)
     bounty_platform = Column(String(100), nullable=True)  # intigriti, hackerone, etc.
     scope_tags = Column(JSON, nullable=True)  # List of scope-related tags
-    auth_info = Column(JSON, nullable=True)  # Auth credentials/headers/cookies
+    auth_info = Column(EncryptedJSON(), nullable=True)  # Encrypted credentials/headers/cookies
     status = Column(SQLEnum(TargetStatus), default=TargetStatus.RECON_ONLY, nullable=False)
     
     # Relationships

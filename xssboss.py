@@ -231,10 +231,25 @@ def start_scan_internal(target_id: int, strategy: str) -> None:
         db.refresh(exp)
         
         click.echo(f"{Fore.GREEN}[+] Scan Campaign created with ID: {exp.id}{Style.RESET_ALL}")
-        click.echo(f"{Fore.YELLOW}[*] Deploying browser audit pipeline... (Press Ctrl+C to pause/abort){Style.RESET_ALL}\n")
+        click.echo(f"{Fore.YELLOW}[*] Deploying River-to-Sea audit pipeline... (Press Ctrl+C to pause/abort){Style.RESET_ALL}\n")
         
+        def cli_progress_callback(phase: str, message: str, doing_status: str = None, micro_state: dict = None, river_stage: str = None):
+            symbols = {
+                "springs": f"{Fore.CYAN}[The Springs]{Style.RESET_ALL}",
+                "recon": f"{Fore.BLUE}[Recon Rapids]{Style.RESET_ALL}",
+                "params": f"{Fore.MAGENTA}[Param Tributaries]{Style.RESET_ALL}",
+                "contexts": f"{Fore.YELLOW}[Context Confluence]{Style.RESET_ALL}",
+                "filters": f"{Fore.MAGENTA}[Filter Channels]{Style.RESET_ALL}",
+                "auditors": f"{Fore.CYAN}[Auditor Cascades]{Style.RESET_ALL}",
+                "browser": f"{Fore.BLUE}[Browser Whirlpool]{Style.RESET_ALL}",
+                "sea": f"{Fore.GREEN}[Sea of Findings]{Style.RESET_ALL}",
+            }
+            stage_sym = symbols.get(river_stage or phase, f"{Fore.CYAN}[{phase.upper()}]{Style.RESET_ALL}")
+            active_doing = doing_status or message
+            click.echo(f"  {stage_sym} {active_doing}")
+
         fuzzer = FuzzingService(db)
-        fuzzer.run_experiment(exp.id)
+        fuzzer.run_experiment(exp.id, progress_callback=cli_progress_callback)
         
         db.refresh(exp)
         if exp.status == ExperimentStatus.COMPLETED:
@@ -680,8 +695,92 @@ def run_recon(target_id, threads):
         click.echo(f"    Framework Routes:         {Fore.MAGENTA}{summary.framework_routes_count}{Style.RESET_ALL}")
         click.echo(f"    GraphQL Endpoints:        {Fore.YELLOW}{summary.graphql_endpoints_count}{Style.RESET_ALL}")
         click.echo(f"    OpenAPI Endpoints:        {Fore.YELLOW}{summary.openapi_endpoints_count}{Style.RESET_ALL}")
+        click.echo(f"    Client Bundles Recorded:  {Fore.CYAN}{len(summary.details.get('client_bundles', []))}{Style.RESET_ALL}")
+        click.echo(f"    DOM Sink Indicators:      {Fore.YELLOW}{summary.discovered_sinks_count}{Style.RESET_ALL}")
+        click.echo(f"    Secret Indicators:        {Fore.YELLOW}{summary.discovered_tokens_count} (values redacted){Style.RESET_ALL}")
+        from backend_api.services.recon_dossier_service import ReconDossierService
+
+        dossier = ReconDossierService.build(db, target_id, observations=summary.details)
+        dossier_path = ReconDossierService.export(
+            dossier,
+            ROOT / "reports" / f"recon_dossier_target_{target_id}.json",
+        )
+        active_classes = sum(
+            1 for item in dossier["coverage_matrix"].values() if item["kind"] in {"fuzz", "auditor"}
+        )
+        research_classes = sum(
+            1 for item in dossier["coverage_matrix"].values() if item["kind"] == "research"
+        )
+        click.echo(
+            f"    Cross-bug classes routed: {Fore.CYAN}{active_classes} active + "
+            f"{research_classes} research{Style.RESET_ALL}"
+        )
+        click.echo(f"    Full recon dossier:       {Fore.GREEN}{dossier_path}{Style.RESET_ALL}")
     finally:
         db.close()
+
+
+@recon.command(name="dossier")
+@click.option("--target-id", required=True, type=int, help="Target ID whose stored recon should be exported.")
+@click.option("--output", default=None, type=click.Path(dir_okay=False, path_type=Path), help="Optional JSON output path.")
+def recon_dossier(target_id: int, output: Path | None):
+    """Export all stored recon data and its cross-vulnerability routing plan."""
+    db = SessionLocal()
+    try:
+        from backend_api.services.recon_dossier_service import ReconDossierService
+
+        dossier = ReconDossierService.build(db, target_id)
+        path = output or ROOT / "reports" / f"recon_dossier_target_{target_id}.json"
+        ReconDossierService.export(dossier, path)
+        click.echo(
+            f"{Fore.GREEN}[+] Exported {dossier['summary']['endpoints']} endpoint(s), "
+            f"{dossier['summary']['parameters']} parameter(s), and "
+            f"{dossier['summary']['bug_classes']} routed bug classes to {path}.{Style.RESET_ALL}"
+        )
+    finally:
+        db.close()
+
+@recon.command(name="har")
+@click.argument("har_file")
+@click.option("--target-id", required=True, type=int, help="Target to attach imported endpoints to.")
+def recon_har(har_file, target_id):
+    """Import a browser HAR capture (endpoints + params) into a target."""
+    click.echo(BANNER)
+    from recon_engine.har_import import HARImporter
+    db = SessionLocal()
+    try:
+        count = HARImporter.import_to_database(har_file, target_id, db)
+        click.echo(f"{Fore.GREEN}[+] Imported {count} endpoint(s) from {har_file} into target #{target_id}.{Style.RESET_ALL}")
+    finally:
+        db.close()
+
+
+@recon.command(name="stored-flows")
+@click.option("--target-id", required=True, type=int, help="Target to map stored plant→render edges for.")
+@click.option("--max-sources", default=25, type=int, help="Max input sources to plant canaries into.")
+def recon_stored_flows(target_id, max_sources):
+    """Discover stored plant→render edges via inert canary correlation (feeds stored-XSS verification)."""
+    click.echo(BANNER)
+    from backend_api.services.stored_flow_discovery import StoredFlowDiscovery, SourceCandidate
+    from backend_api.models.endpoint import Endpoint
+    from backend_api.models.param import Param
+    db = SessionLocal()
+    try:
+        endpoints = db.query(Endpoint).filter(Endpoint.target_id == target_id).all()
+        render_ids = [e.id for e in endpoints]
+        sources = [SourceCandidate(endpoint_id=e.id, param_id=p.id, label=p.name)
+                   for e in endpoints for p in db.query(Param).filter(Param.endpoint_id == e.id).all()]
+        if not sources:
+            click.echo(f"{Fore.YELLOW}[!] No params found for target #{target_id}. Run recon first.{Style.RESET_ALL}")
+            return
+        edges = StoredFlowDiscovery.discover_for_target(db, target_id, sources, render_ids, max_sources=max_sources)
+        confirmed = StoredFlowDiscovery.confirmed_edges(edges)
+        click.echo(f"{Fore.GREEN}[+] Planted {len(edges)} canaries; {len(confirmed)} stored plant→render edge(s) found.{Style.RESET_ALL}")
+        for e in confirmed:
+            click.echo(f"    param#{e.param_id} @ endpoint#{e.source_endpoint_id} → renders on {e.render_endpoint_ids}")
+    finally:
+        db.close()
+
 
 @recon.command(name="graphql")
 @click.option("--url", required=True, help="Target base URL or GraphQL endpoint.")
@@ -803,7 +902,15 @@ def profile_param(url, param, method):
 
 
 # --- AUTONOMOUS BOUNTY HUNT ---
-def hunt_internal(target_id: int | None, url: str | None, name: str | None, max_pages: int, strategy: str, auto_report: bool):
+def hunt_internal(
+    target_id: int | None,
+    url: str | None,
+    name: str | None,
+    max_pages: int,
+    strategy: str,
+    auto_report: bool,
+    max_cases: int = 30,
+):
     from urllib.parse import urlparse
     db = SessionLocal()
     try:
@@ -828,9 +935,36 @@ def hunt_internal(target_id: int | None, url: str | None, name: str | None, max_
 
         click.echo(f"{Fore.CYAN}[*] Starting Autonomous Bug Bounty Hunt against: {target.name} ({target.base_url}){Style.RESET_ALL}")
         click.echo(f"{Fore.CYAN}[*] Phase 1: Stealth Crawler & SPA Bundle Analysis (Max Pages: {max_pages}){Style.RESET_ALL}")
-        
+
+        # The supplied seed is itself an endpoint. Persist it before browser
+        # crawling so a one-page run or crawler failure cannot silently produce
+        # a zero-endpoint "successful" hunt.
+        from urllib.parse import parse_qsl
+        from backend_api.services.recon_service import ReconService
+        seed_parsed = urlparse(target.base_url)
+        ReconService.create_endpoint_from_request(
+            db,
+            target.id,
+            "GET",
+            target.base_url,
+            {
+                "headers": {},
+                "query": dict(parse_qsl(seed_parsed.query, keep_blank_values=True)),
+                "body": None,
+                "json": None,
+            },
+        )
+        db.commit()
+
         from recon_engine.crawler import Crawler
-        c = Crawler(base_url=target.base_url, max_depth=3, max_pages=max_pages)
+        c = Crawler(
+            base_url=target.base_url,
+            max_depth=3,
+            max_pages=max_pages,
+            progress_callback=lambda page_url, depth, visited, limit: click.echo(
+                f"    [crawl] {visited}/{limit} depth={depth} {page_url}", err=True
+            ),
+        )
         c.db_session = db
         c.target_id = target.id
         c._target_obj = target
@@ -846,7 +980,7 @@ def hunt_internal(target_id: int | None, url: str | None, name: str | None, max_
             strategy=ExperimentStrategy(strategy),
             status=ExperimentStatus.RUNNING,
             started_at=datetime.now(UTC),
-            limits={"max_test_cases": 10, "max_cases_per_param": 3, "browser_pool_size": 2}
+            limits={"max_test_cases": max_cases, "max_cases_per_param": 3, "browser_pool_size": 2}
         )
         db.add(exp)
         db.commit()
@@ -854,13 +988,49 @@ def hunt_internal(target_id: int | None, url: str | None, name: str | None, max_
 
         click.echo(f"{Fore.YELLOW}[*] Launched Experiment #{exp.id}. Executing auditors & WAF bypass engine...{Style.RESET_ALL}")
         fuzzing_svc = FuzzingService(db)
-        fuzzing_svc.run_experiment(exp.id)
+        fuzzing_svc.run_experiment(
+            exp.id,
+            progress_callback=lambda phase, message: click.echo(
+                f"    [{phase}] {message}", err=True
+            ),
+        )
+        db.expire_all()
+        exp = db.query(Experiment).filter(Experiment.id == exp.id).first()
 
-        click.echo(f"{Fore.GREEN}[+] Phase 2 Complete: Experiment #{exp.id} finished with status: {exp.status.value}.{Style.RESET_ALL}")
+        limits = exp.limits if isinstance(exp.limits, dict) else {}
+        coverage = limits.get("coverage") if isinstance(limits.get("coverage"), dict) else {}
+        done = limits.get("done") if isinstance(limits.get("done"), dict) else {}
+        status_color = Fore.GREEN if exp.status == ExperimentStatus.COMPLETED else Fore.RED
+        click.echo(
+            f"{status_color}[+] Phase 2 finished: Experiment #{exp.id} status={exp.status.value}; "
+            f"coverage={coverage.get('tested_endpoints', 0)}/{coverage.get('eligible_endpoints', 0)}; "
+            f"execution_errors={done.get('execution_errors', 0)}; reason={done.get('reason', 'unknown')}.{Style.RESET_ALL}"
+        )
 
         # Triage and report
-        findings = db.query(Finding).join(Endpoint).filter(Endpoint.target_id == target.id).all()
-        click.echo(f"\n{Fore.GREEN}[+] Discovered {len(findings)} Total Finding(s) for {target.name}:{Style.RESET_ALL}")
+        from backend_api.services.campaign_report_service import CampaignReportService
+        findings = CampaignReportService.get_findings_for_experiment(db, exp.id)
+        finding_scope = "this run"
+        if not findings:
+            # Some native/auditor findings are target-scoped rather than linked
+            # through a browser TestCase. Never hide already-confirmed target
+            # evidence just because the current experiment produced no linked
+            # rows (for example, a resumed/report-only hunt).
+            findings = (
+                db.query(Finding)
+                .join(Endpoint, Finding.endpoint_id == Endpoint.id)
+                .filter(
+                    Endpoint.target_id == target.id,
+                    Finding.status == FindingStatus.CONFIRMED,
+                )
+                .order_by(Finding.id.asc())
+                .all()
+            )
+            finding_scope = "confirmed for this target"
+        click.echo(
+            f"\n{Fore.GREEN}[+] Discovered {len(findings)} finding(s) "
+            f"{finding_scope} for {target.name}:{Style.RESET_ALL}"
+        )
 
         rows = []
         for f in findings:
@@ -896,19 +1066,360 @@ def hunt_internal(target_id: int | None, url: str | None, name: str | None, max_
 @click.option("--url", default=None, help="Target URL to hunt directly.")
 @click.option("--name", default=None, help="Program name.")
 @click.option("--max-pages", default=15, type=int, help="Max pages to crawl.")
+@click.option("--max-cases", default=30, type=click.IntRange(1, 10000), help="Maximum browser test cases for this hunt.")
 @click.option("--strategy", default="quick_light", type=click.Choice([s.value for s in ExperimentStrategy]), help="Fuzzing strategy profile.")
 @click.option("--report", is_flag=True, default=True, help="Auto-generate HackerOne markdown report and standalone HTML PoC.")
-def hunt(target_id, url, name, max_pages, strategy, report):
+def hunt(target_id, url, name, max_pages, max_cases, strategy, report):
     """Run an end-to-end autonomous Bug Bounty hunting operation."""
     click.echo(BANNER)
-    hunt_internal(target_id, url, name, max_pages, strategy, report)
+    hunt_internal(target_id, url, name, max_pages, strategy, report, max_cases=max_cases)
 
 # --- SYSTEM STATUS ---
+@cli.command(name="pipe")
+@click.option("--candidates-only", is_flag=True, help="Only print URLs that look injectable.")
+@click.option("--json", "as_json", is_flag=True, help="Emit JSON results.")
+def pipe_cmd(candidates_only, as_json):
+    """Fast HTTP triage of URLs from stdin (e.g. `cat urls.txt | xssboss pipe --candidates-only`)."""
+    import sys as _sys
+    import json as _json
+    from backend_api.services.pipe_scan_service import PipeScanService
+    urls = [ln.strip() for ln in _sys.stdin if ln.strip()]
+    results = PipeScanService.scan_urls(urls, candidates_only=candidates_only)
+    if as_json:
+        click.echo(_json.dumps(results, indent=2))
+        return
+    for r in results:
+        if r.get("error"):
+            continue
+        mark = f"{Fore.RED}[CANDIDATE]{Style.RESET_ALL}" if r["candidate"] else f"{Fore.GREEN}[clean]{Style.RESET_ALL}"
+        click.echo(f"{mark} {r['url']}  libs={len(r.get('vulnerable_libraries', []))} "
+                   f"dom={len(r.get('dom_sinks', []))}  ({r.get('reason')})")
+
+
+@cli.command(name="mcp")
+def mcp_cmd():
+    """Run the MCP stdio server — expose XSSBOSS tools (taint/decide/scan) to AI agents."""
+    from analysis_engine.mcp_server import McpServer
+    McpServer().serve()
+
+
 @cli.command(name="status")
 def system_status():
     """Show the overall fuzzer database statistics."""
     click.echo(BANNER)
     system_status_internal()
+
+
+# --- PROXY COMMANDS ---
+@cli.group()
+def proxy():
+    """Manage and inspect free proxy rotation and pool health."""
+    pass
+
+
+@proxy.command(name="status")
+def proxy_status_cmd():
+    """Show active proxy pool metrics and rotation status."""
+    click.echo(BANNER)
+    from backend_api.utils.stealth import get_proxy_pool_status
+    st = get_proxy_pool_status()
+    click.echo(f"{Fore.CYAN}{Style.BRIGHT}=== XSS BOSS PROXY POOL STATUS ==={Style.RESET_ALL}\n")
+    click.echo(f"  Enabled:         {Fore.GREEN if st['enabled'] else Fore.RED}{st['enabled']}{Style.RESET_ALL}")
+    click.echo(f"  Active Proxies:  {Fore.YELLOW}{st['active_count']}{Style.RESET_ALL}")
+    click.echo(f"  Ejected Proxies: {Fore.RED if st['ejected_count'] > 0 else Fore.WHITE}{st['ejected_count']}{Style.RESET_ALL}")
+    click.echo(f"  Rotation Mode:   {Fore.CYAN}{st['rotation_mode']}{Style.RESET_ALL}")
+    click.echo(f"  Static Proxy:    {st['static_proxy'] or 'None'}")
+    click.echo(f"  Burp Proxy:      {st['burp_proxy'] or 'None'}")
+
+
+@proxy.command(name="refresh")
+def proxy_refresh_cmd():
+    """Reload proxies from proxies.txt or environment configuration."""
+    click.echo(BANNER)
+    from backend_api.utils.stealth import _init_proxy_pool, get_proxy_pool_status
+    _init_proxy_pool()
+    st = get_proxy_pool_status()
+    click.echo(f"{Fore.GREEN}[+] Proxy pool reloaded: {st['active_count']} active proxies ready.{Style.RESET_ALL}")
+
+
+@proxy.command(name="test")
+@click.option("--url", default="https://httpbin.org/ip", help="Target URL to test proxy connectivity.")
+@click.option("--proxy-url", default=None, help="Specific proxy URL to test.")
+@click.option("--timeout", default=5.0, type=float, help="Timeout in seconds.")
+def proxy_test_cmd(url, proxy_url, timeout):
+    """Test connectivity through the proxy pool."""
+    click.echo(BANNER)
+    import httpx
+    import time
+    from backend_api.utils.stealth import get_next_proxy, mark_proxy_success, mark_proxy_failed
+
+    p = proxy_url or get_next_proxy()
+    if not p:
+        click.echo(f"{Fore.YELLOW}[!] No proxy available. Direct request will be made.{Style.RESET_ALL}")
+        return
+
+    click.echo(f"[*] Testing connectivity to {url} through {p} (timeout: {timeout}s)...")
+    start = time.time()
+    try:
+        with httpx.Client(proxies=p, timeout=timeout, verify=False, follow_redirects=True) as client:
+            resp = client.get(url)
+            latency = (time.time() - start) * 1000
+            mark_proxy_success(p)
+            click.echo(f"{Fore.GREEN}[+] SUCCESS: HTTP {resp.status_code} ({latency:.0f}ms){Style.RESET_ALL}")
+            click.echo(f"    Response snippet: {resp.text[:150]}")
+    except Exception as exc:
+        mark_proxy_failed(p)
+        click.echo(f"{Fore.RED}[-] FAILED through {p}: {exc}{Style.RESET_ALL}")
+
+
+# --- HACKERONE SCRAPER COMMANDS ---
+@cli.group()
+def hackerone():
+    """Scrape, inspect, and sync HackerOne bug bounty programs and scopes."""
+    pass
+
+
+@hackerone.command(name="list")
+@click.option("--bounty-only/--all", default=True, help="Filter for bounty-paying programs only.")
+@click.option("--query", "-q", default=None, help="Search by program name or handle.")
+@click.option("--asset-type", default=None, help="Filter by asset type (e.g. URL, DOMAIN, WILDCARD).")
+@click.option("--limit", default=30, type=int, help="Max programs to display.")
+def hackerone_list_cmd(bounty_only, query, asset_type, limit):
+    """List public HackerOne programs with in-scope asset counts."""
+    click.echo(BANNER)
+    from backend_api.services.hackerone_scraper_service import HackerOneScraperService
+    click.echo(f"[*] Fetching HackerOne programs (bounty_only={bounty_only}, query={query or '*'}, limit={limit})...\n")
+    try:
+        programs = HackerOneScraperService.fetch_all_programs(
+            bounty_only=bounty_only,
+            query=query,
+            asset_type=asset_type,
+            limit=limit,
+        )
+        if not programs:
+            click.echo(f"{Fore.YELLOW}[!] No matching HackerOne programs found.{Style.RESET_ALL}")
+            return
+
+        click.echo(f"{Fore.CYAN}{Style.BRIGHT}{'#':<4} {'PROGRAM NAME':<35} {'HANDLE':<20} {'BOUNTY':<8} {'SCOPES':<8} {'PRIMARY URL'}{Style.RESET_ALL}")
+        click.echo("-" * 105)
+        for i, p in enumerate(programs, 1):
+            bounty_str = f"{Fore.GREEN}YES{Style.RESET_ALL}" if p["offers_bounties"] else f"{Fore.WHITE}NO{Style.RESET_ALL}"
+            primary = p["primary_url"][:40] + ("..." if len(p["primary_url"]) > 40 else "")
+            click.echo(f"{i:<4} {p['name'][:34]:<35} @{p['handle'][:18]:<19} {bounty_str:<17} {p['in_scope_count']:<8} {Fore.BLUE}{primary}{Style.RESET_ALL}")
+        click.echo(f"\n[+] Displayed {len(programs)} programs. Use 'xssboss hackerone view <handle>' for detailed scope.")
+    except Exception as exc:
+        click.echo(f"{Fore.RED}[-] Failed to fetch HackerOne programs: {exc}{Style.RESET_ALL}")
+
+
+@hackerone.command(name="view")
+@click.argument("handle")
+def hackerone_view_cmd(handle):
+    """View full in-scope targets and out-of-scope rules for a HackerOne program."""
+    click.echo(BANNER)
+    from backend_api.services.hackerone_scraper_service import HackerOneScraperService
+    click.echo(f"[*] Looking up HackerOne program @{handle}...\n")
+    prog = HackerOneScraperService.fetch_program_by_handle(handle)
+    if not prog:
+        click.echo(f"{Fore.RED}[-] Program @{handle} not found.{Style.RESET_ALL}")
+        return
+
+    click.echo(f"{Fore.CYAN}{Style.BRIGHT}=== {prog['name']} (@{prog['handle']}) ==={Style.RESET_ALL}")
+    click.echo(f"  URL:             {prog['url']}")
+    click.echo(f"  Website:         {prog['website'] or 'N/A'}")
+    click.echo(f"  Bounties:        {Fore.GREEN if prog['offers_bounties'] else Fore.WHITE}{'Yes' if prog['offers_bounties'] else 'No (VDP)'}{Style.RESET_ALL}")
+    click.echo(f"  State:           {prog['submission_state']}")
+    click.echo(f"  In-Scope Count:  {Fore.YELLOW}{prog['in_scope_count']}{Style.RESET_ALL}")
+    click.echo(f"  Out-Scope Count: {prog['out_of_scope_count']}")
+
+    click.echo(f"\n{Fore.GREEN}{Style.BRIGHT}--- IN-SCOPE TARGETS ({len(prog['in_scope'])}) ---{Style.RESET_ALL}")
+    for item in prog['in_scope'][:50]:
+        ident = item.get("asset_identifier")
+        atype = item.get("asset_type")
+        bounty = "[Bounty]" if item.get("eligible_for_bounty") else "[No Bounty]"
+        sev = item.get("max_severity") or ""
+        click.echo(f"  - {Fore.WHITE}{ident}{Style.RESET_ALL} ({atype}) {Fore.GREEN}{bounty}{Style.RESET_ALL} {sev}")
+
+    if len(prog['in_scope']) > 50:
+        click.echo(f"  ... and {len(prog['in_scope']) - 50} more in-scope targets.")
+
+    if prog['out_of_scope']:
+        click.echo(f"\n{Fore.RED}{Style.BRIGHT}--- OUT-OF-SCOPE ASSETS / EXCLUSIONS ({len(prog['out_of_scope'])}) ---{Style.RESET_ALL}")
+        for item in prog['out_of_scope'][:30]:
+            click.echo(f"  - {Fore.YELLOW}{item.get('asset_identifier')}{Style.RESET_ALL} ({item.get('asset_type')})")
+
+
+@hackerone.command(name="sync")
+@click.option("--handle", default=None, help="Specific program handle to import (e.g. oppo_bbp).")
+@click.option("--bounty-only/--all", default=True, help="Import bounty-offering programs only.")
+@click.option("--limit", default=25, type=int, help="Max programs to import into target database.")
+def hackerone_sync_cmd(handle, bounty_only, limit):
+    """Sync HackerOne programs directly into XSS Boss Target database."""
+    click.echo(BANNER)
+    from backend_api.db.session import SessionLocal
+    from backend_api.services.hackerone_scraper_service import HackerOneScraperService
+
+    db = SessionLocal()
+    try:
+        handles = [handle] if handle else None
+        click.echo(f"[*] Syncing HackerOne programs into XSS Boss target database (limit={limit})...")
+        res = HackerOneScraperService.bulk_sync_to_database(
+            db=db,
+            handles=handles,
+            bounty_only=bounty_only,
+            limit=limit,
+        )
+        click.echo(f"{Fore.GREEN}[+] Successfully synced {res['imported_count']} HackerOne programs into targets!{Style.RESET_ALL}")
+        for t in res["targets"][:10]:
+            click.echo(f"  - Target #{t['target_id']}: {t['name']} (@{t['handle']}) -> {t['base_url']} ({t['scopes_count']} scopes)")
+        if len(res["targets"]) > 10:
+            click.echo(f"  ... and {len(res['targets']) - 10} more targets.")
+    finally:
+        db.close()
+
+
+@hackerone.command(name="export")
+@click.option("--output", "-o", default="hackerone_scopes.json", help="Output file path.")
+@click.option("--format", "export_format", default="json", type=click.Choice(["json", "csv"]), help="Export format.")
+@click.option("--bounty-only/--all", default=False, help="Export only bounty programs.")
+@click.option("--query", "-q", default=None, help="Filter query.")
+def hackerone_export_cmd(output, export_format, bounty_only, query):
+    """Export scraped HackerOne programs and scopes to JSON or CSV."""
+    click.echo(BANNER)
+    from backend_api.services.hackerone_scraper_service import HackerOneScraperService
+    click.echo(f"[*] Exporting HackerOne scopes (format={export_format}, bounty_only={bounty_only})...")
+    programs = HackerOneScraperService.fetch_all_programs(bounty_only=bounty_only, query=query)
+    data = HackerOneScraperService.export_programs(programs, export_format=export_format)
+    with open(output, "w", encoding="utf-8") as f:
+        f.write(data)
+    click.echo(f"{Fore.GREEN}[+] Saved {len(programs)} program scopes to {output}{Style.RESET_ALL}")
+
+
+@hackerone.command(name="scope")
+@click.argument("target_id", type=int)
+@click.option("--burp", "burp_output", default=None, help="Write a Burp Suite scope config to this file.")
+@click.option("--limit", default=25, type=int, help="Max prioritized assets to display.")
+def hackerone_scope_cmd(target_id, burp_output, limit):
+    """Show a synced program's scope boundaries as a prioritized worklist (URL -> program mode)."""
+    click.echo(BANNER)
+    from backend_api.db.session import SessionLocal
+    from backend_api.models.target import Target
+    from backend_api.services.program_scope import ProgramScope
+
+    db = SessionLocal()
+    try:
+        target = db.query(Target).filter(Target.id == target_id).first()
+        if not target:
+            click.echo(f"{Fore.RED}[!] Target #{target_id} not found. Run 'hackerone sync' first.{Style.RESET_ALL}")
+            return
+        ps = ProgramScope.from_target(target)
+        s = ps.summary()
+        click.echo(f"{Fore.CYAN}Program @{s['handle']}  bounties={s['offers_bounties']}  "
+                   f"web_assets={s['web_assets']}  bounty_eligible={s['bounty_eligible_assets']}  "
+                   f"exclusions={s['exclusions']}{Style.RESET_ALL}")
+        rows = [
+            [i + 1, a.host, a.asset_type or "-", "yes" if a.eligible_for_bounty else "no", a.max_severity or "-"]
+            for i, a in enumerate(ps.worklist()[:limit])
+        ]
+        print_table(
+            ["#", "Host", "Type", "Bounty", "Max Sev"], rows,
+            color_mappers={3: lambda v: Fore.GREEN if v == "yes" else Fore.WHITE, 4: get_severity_color},
+        )
+        if burp_output:
+            with open(burp_output, "w", encoding="utf-8") as f:
+                json.dump(ps.to_burp_scope(), f, indent=2)
+            click.echo(f"{Fore.GREEN}[+] Wrote Burp scope config ({len(ps.web_assets())} in-scope hosts) "
+                       f"to {burp_output}. Load it via Burp > Target > Scope > Load options.{Style.RESET_ALL}")
+    finally:
+        db.close()
+
+
+@hackerone.command(name="hunt-program")
+@click.argument("target_id", type=int)
+@click.option("--max-assets", default=10, type=int, help="Max in-scope assets to hunt (priority order).")
+@click.option("--budget", default=1500, type=int, help="Total request budget across the whole program.")
+@click.option("--per-asset", default=300, type=int, help="Per-asset request cap (protects the budget from one wildcard).")
+@click.option("--strategy", default="quick_light", type=click.Choice([s.value for s in ExperimentStrategy]), help="Fuzzing strategy.")
+@click.option("--stop-after", default=None, type=int, help="Stop the whole run after N confirmed findings.")
+@click.option("--max-pages", default=15, type=int, help="Crawl page cap per asset.")
+@click.option("--dry-run", is_flag=True, help="Show the prioritized plan without hunting.")
+@click.option("--resume", is_flag=True, help="Resume from the last checkpoint — skip assets already hunted.")
+def hackerone_hunt_program_cmd(target_id, max_assets, budget, per_asset, strategy, stop_after, max_pages, dry_run, resume):
+    """Autonomously hunt an ENTIRE synced program asset-by-asset (the URL -> program upgrade)."""
+    click.echo(BANNER)
+    from pathlib import Path
+    from backend_api.db.session import SessionLocal
+    from backend_api.models.target import Target
+    from backend_api.services.program_scope import ProgramScope
+    from backend_api.services.program_run_orchestrator import ProgramRunOrchestrator, RunBudget
+    from backend_api.services.program_run_checkpoint import JsonCheckpointStore
+
+    checkpoint = JsonCheckpointStore(str(Path.home() / ".xssboss" / "checkpoints"))
+    run_key = str(target_id)
+    db = SessionLocal()
+    try:
+        target = db.query(Target).filter(Target.id == target_id).first()
+        if not target:
+            click.echo(f"{Fore.RED}[!] Target #{target_id} not found. Run 'hackerone sync' first.{Style.RESET_ALL}")
+            return
+        scope = ProgramScope.from_target(target)
+        budget_obj = RunBudget(
+            max_assets=max_assets, max_requests_total=budget,
+            per_asset_request_cap=per_asset, stop_after_findings=stop_after,
+        )
+
+        if dry_run:
+            report = ProgramRunOrchestrator.run(scope, lambda a, c: {}, budget_obj, dry_run=True)
+            click.echo(f"{Fore.CYAN}Plan for @{scope.handle}: {len(report.outcomes)} assets (priority order){Style.RESET_ALL}")
+            print_table(
+                ["#", "Host", "Bounty", "Max Sev"],
+                [[i + 1, o.host, "yes" if o.eligible_for_bounty else "no", o.max_severity or "-"]
+                 for i, o in enumerate(report.outcomes)],
+                color_mappers={3: get_severity_color},
+            )
+            return
+
+        # Bind the orchestrator to the real crawl -> experiment -> findings path, per asset.
+        from recon_engine.crawler import Crawler
+        from backend_api.models.endpoint import Endpoint
+        from backend_api.models.finding import Finding
+        from backend_api.models.experiment import Experiment, ExperimentStatus
+        from backend_api.services.fuzzing_service import FuzzingService
+
+        def hunt_asset(asset, cap):
+            seed = f"https://{asset.host}/"
+            before = db.query(Finding).join(Endpoint).filter(Endpoint.target_id == target.id).count()
+            ep_count = Crawler(base_url=seed, max_depth=2, max_pages=max_pages).crawl_to_database(target.id, db)
+            exp = Experiment(target_id=target.id, strategy=ExperimentStrategy(strategy), status=ExperimentStatus.RUNNING)
+            db.add(exp); db.commit(); db.refresh(exp)
+            FuzzingService(db).run_experiment(exp.id)
+            after = db.query(Finding).join(Endpoint).filter(Endpoint.target_id == target.id).count()
+            # Request count is not instrumented end-to-end; estimate from endpoints and clamp to the cap.
+            est_requests = min(cap, max(1, ep_count) * 12)
+            return {"endpoints": ep_count, "findings": after - before, "requests_used": est_requests}
+
+        if resume:
+            done = len(checkpoint.load(run_key))
+            click.echo(f"{Fore.CYAN}[*] Resuming: {done} asset(s) already hunted will be skipped.{Style.RESET_ALL}")
+        click.echo(f"{Fore.YELLOW}[*] Hunting @{scope.handle}: up to {max_assets} assets, "
+                   f"budget {budget} requests, strategy={strategy}...{Style.RESET_ALL}")
+        report = ProgramRunOrchestrator.run(
+            scope, hunt_asset, budget_obj,
+            on_progress=lambda o: click.echo(
+                f"  - {o.host}: {o.status}  endpoints={o.endpoints} findings={o.findings} req~{o.requests_used}"
+            ),
+            checkpoint=checkpoint, resume=resume, run_key=run_key,
+        )
+        print_table(
+            ["Host", "Status", "Endpoints", "Findings", "Req~"],
+            [[o.host, o.status, o.endpoints, o.findings, o.requests_used] for o in report.outcomes],
+            color_mappers={1: get_status_color},
+        )
+        click.echo(f"{Fore.GREEN}[+] Program run complete: {report.total_findings} findings across "
+                   f"{report.assets_run} assets (~{report.total_requests} requests). "
+                   f"Stopped: {report.stopped_reason}.{Style.RESET_ALL}")
+    finally:
+        db.close()
+
 
 if __name__ == "__main__":
     cli()

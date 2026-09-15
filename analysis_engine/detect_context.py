@@ -13,6 +13,7 @@ from backend_api.utils.request_builder import RequestBuilder
 from backend_api.services.context_service import ContextService
 from backend_api.utils.logger import logger
 from backend_api.config import settings
+from backend_api.utils.stealth import get_http_proxy_kwargs
 from analysis_engine.filter_profiler import FilterProfiler, FilterProfile
 
 CONTEXT_PROBE_TIMEOUT = httpx.Timeout(4.0, connect=2.0)
@@ -23,10 +24,10 @@ def _probe_kwargs() -> Dict[str, Any]:
         "timeout": CONTEXT_PROBE_TIMEOUT,
         "trust_env": False,
         "follow_redirects": True,
+        "verify": not settings.ALLOW_INSECURE_TLS,
     }
-    if settings.PROXY_URL:
-        kwargs["proxies"] = settings.PROXY_URL
-        kwargs["verify"] = False
+    proxy_kwargs = get_http_proxy_kwargs(rotated=True)
+    kwargs.update(proxy_kwargs)
     return kwargs
 
 
@@ -60,6 +61,13 @@ class ContextDetectorEngine:
             raise ValueError(f"Endpoint {endpoint_id} not found")
         
         params = self.db.query(Param).filter(Param.endpoint_id == endpoint_id).all()
+        if not params:
+            logger.info(
+                "Skipping context probes for endpoint %s because recon found no controllable parameters",
+                endpoint_id,
+            )
+            return []
+
         contexts = []
         
         for param in params:
@@ -162,6 +170,9 @@ class ContextDetectorEngine:
         
         # Build and send HTTP request
         try:
+            from backend_api.utils.rate_limiter import rate_limiter
+            rate_limiter.wait_for_slot(url)
+
             # Use httpx directly for request
             if param.location == "query":
                 params_dict[param.name] = marker
@@ -239,7 +250,12 @@ class ContextDetectorEngine:
                 )
             else:
                 raise ValueError(f"Unknown parameter location: {param.location}")
-            
+
+            if response.status_code in (429, 403):
+                rate_limiter.report_error(url, is_rate_limit=True)
+            elif response.status_code < 400:
+                rate_limiter.report_success(url)
+
             if response.status_code >= 400:
                 # If blocked by WAF/bot-protection on GET or query/path, try browser-based fallback
                 if (
@@ -256,7 +272,14 @@ class ContextDetectorEngine:
                         try:
                             b_driver.set_page_load_timeout(timeout)
                             probe_target_url = url_with_query if param.location == "query" else url
-                            b_driver.get(probe_target_url)
+                            rate_limiter.wait_for_slot(probe_target_url)
+                            try:
+                                b_driver.get(probe_target_url)
+                            except Exception:
+                                rate_limiter.report_error(probe_target_url)
+                                raise
+                            else:
+                                rate_limiter.report_success(probe_target_url)
                             response_text = b_driver.page_source
                             content_type = "text/html"
                         finally:
@@ -288,11 +311,13 @@ class ContextDetectorEngine:
                     ContextDetector.detect_json_reflection(response_text, marker)
                 )
             
-            # URL contexts (check if marker in URL)
-            if marker in str(response.url):
-                contexts_data.extend(
-                    ContextDetector.detect_url_reflection(str(response.url), marker)
-                )
+            # Do not classify the request's own query string as a reflection.
+            # URL execution contexts require an observed redirect/location sink;
+            # merely seeing our marker in response.url is true for every query
+            # probe and masks real DOM source->sink analysis (for example
+            # URLSearchParams('next') flowing into innerHTML).
+            if response.history and marker in str(response.url):
+                contexts_data.extend(ContextDetector.detect_url_reflection(str(response.url), marker))
             
             # Create context records
             created_contexts = []

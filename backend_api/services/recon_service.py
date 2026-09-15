@@ -6,6 +6,7 @@ from backend_api.models.endpoint import Endpoint
 from backend_api.models.param import Param, ParamLocation
 from backend_api.utils.errors import NotFoundError, ValidationError
 from backend_api.utils.scope_guard import is_url_in_scope
+from backend_api.config import settings
 from recon_engine.normalizer import RequestNormalizer
 
 
@@ -78,6 +79,15 @@ class ReconService:
 
         if not is_url_in_scope(target, url_pattern):
             raise ValidationError("Request URL is outside the target's configured bug bounty scope")
+
+        request_data = dict(request_data or {})
+        if target.auth_info:
+            from backend_api.services.auth_session_service import AuthSessionService
+
+            request_data["headers"] = AuthSessionService.request_context(
+                target.auth_info,
+                endpoint_context=request_data.get("headers") or {},
+            )
         
         # Get content type for signature
         content_type = request_data.get('headers', {}).get('Content-Type', '')
@@ -102,7 +112,7 @@ class ReconService:
                 existing.sample_request_body = request_data.get('body') or request_data.get('json')
             if not existing.sample_response_body and response_data:
                 existing.sample_response_body = response_data.get('body')
-            if not existing.auth_context:
+            if target.auth_info or not existing.auth_context:
                 existing.auth_context = request_data.get('headers', {})
             endpoint = existing
             db.flush()
@@ -145,7 +155,7 @@ class ReconService:
                 # Perform parameter profiling via ChatGPT
                 try:
                     sample_resp = response_data.get('body', '') if response_data else ''
-                    if sample_resp:
+                    if sample_resp and settings.LLM_ENABLED:
                         from backend_api.services.llm_service import LLMService
                         prediction = LLMService.predict_parameter_context(endpoint, param, sample_resp)
                         if prediction:

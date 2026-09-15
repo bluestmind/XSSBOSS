@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from backend_api.config import settings
 from backend_api.models.experiment import ExperimentStrategy
+from backend_api.services.fuzzing_service import FuzzingService
 from fuzzer.generator import PayloadGenerator
 from fuzzer.strategy import Strategy, StrategyProfile
 
@@ -25,6 +26,21 @@ class StrategyTests(unittest.TestCase):
         self.assertGreaterEqual(len(payloads), 6)
         self.assertLessEqual(len(payloads), 12)
         self.assertTrue(all("adaptive_token_123" in payload for payload in payloads))
+
+    def test_service_honors_strategy_budget_within_global_cap(self):
+        with patch.object(settings, "MAX_PAYLOADS_PER_CONTEXT", 32):
+            self.assertEqual(
+                FuzzingService._payload_limit_for_strategy(Strategy.QUICK_LIGHT),
+                3,
+            )
+            self.assertEqual(
+                FuzzingService._payload_limit_for_strategy(Strategy.SMART_ADAPTIVE),
+                12,
+            )
+            self.assertEqual(
+                FuzzingService._payload_limit_for_strategy(Strategy.MAX_COVERAGE),
+                32,
+            )
 
     def test_csp_profile_rejects_script_payload_in_preferred_context(self):
         self.assertFalse(StrategyProfile.should_use_payload(
@@ -59,6 +75,24 @@ class StrategyTests(unittest.TestCase):
         self.assertTrue(any(
             f"onbegin=__XSS__`{token}`" in payload for payload in payloads
         ))
+
+    def test_context_specific_raw_text_and_template_grammars(self):
+        generator = PayloadGenerator()
+        token = "CONTEXT_TOKEN"
+
+        comment = generator.generate_payloads(
+            "HTML_COMMENT", token, Strategy.QUICK_LIGHT
+        )
+        rcdata = generator.generate_payloads(
+            "HTML_RCDATA", token, Strategy.QUICK_LIGHT
+        )
+        template = generator.generate_payloads(
+            "JS_TEMPLATE_LITERAL", token, Strategy.JS_STRING_SPECIALIST
+        )
+
+        self.assertTrue(any("-->" in payload and token in payload for payload in comment))
+        self.assertTrue(any("</textarea>" in payload and token in payload for payload in rcdata))
+        self.assertTrue(any(payload.startswith("${") and token in payload for payload in template))
 
 
 if __name__ == "__main__":

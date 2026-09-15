@@ -18,6 +18,8 @@ except ImportError:
     httpx = None
 
 from backend_api.utils.logger import logger
+from backend_api.config import settings
+from backend_api.utils.rate_limiter import rate_limited_call
 
 
 class CharacterState(str, enum.Enum):
@@ -173,12 +175,38 @@ class FilterProfiler:
         # 1. Single combined canary probe to minimize network traffic
         combined_payload = "".join(f"{CANARY_PREFIX}{ch}{CANARY_SUFFIX}" for ch in TEST_CHARACTERS)
         
+        proxy_kwargs = {}
         try:
-            with httpx.Client(timeout=self.timeout, follow_redirects=True) as client:
+            from backend_api.utils.stealth import get_http_proxy_kwargs
+            proxy_kwargs = get_http_proxy_kwargs(rotated=True)
+        except Exception:
+            pass
+
+        try:
+            with httpx.Client(
+                timeout=self.timeout,
+                follow_redirects=True,
+                verify=not settings.ALLOW_INSECURE_TLS,
+                **proxy_kwargs,
+            ) as client:
                 if method.upper() == "GET":
-                    resp = client.get(url, params={param_name: combined_payload}, headers=client_headers)
+                    resp = rate_limited_call(
+                        url,
+                        lambda: client.get(
+                            url,
+                            params={param_name: combined_payload},
+                            headers=client_headers,
+                        ),
+                    )
                 else:
-                    resp = client.post(url, data={param_name: combined_payload}, headers=client_headers)
+                    resp = rate_limited_call(
+                        url,
+                        lambda: client.post(
+                            url,
+                            data={param_name: combined_payload},
+                            headers=client_headers,
+                        ),
+                    )
 
                 resp_text = resp.text
                 for ch in TEST_CHARACTERS:
@@ -198,11 +226,30 @@ class FilterProfiler:
             from analysis_engine.automata_learner import AutomataLearner
             def remote_transform(probe_str: str) -> str:
                 try:
-                    with httpx.Client(timeout=self.timeout, follow_redirects=True) as client:
+                    with httpx.Client(
+                        timeout=self.timeout,
+                        follow_redirects=False,
+                        verify=not settings.ALLOW_INSECURE_TLS,
+                        **proxy_kwargs,
+                    ) as client:
                         if method.upper() == "GET":
-                            r = client.get(url, params={param_name: probe_str}, headers=client_headers)
+                            r = rate_limited_call(
+                                url,
+                                lambda: client.get(
+                                    url,
+                                    params={param_name: probe_str},
+                                    headers=client_headers,
+                                ),
+                            )
                         else:
-                            r = client.post(url, data={param_name: probe_str}, headers=client_headers)
+                            r = rate_limited_call(
+                                url,
+                                lambda: client.post(
+                                    url,
+                                    data={param_name: probe_str},
+                                    headers=client_headers,
+                                ),
+                            )
                         return r.text
                 except Exception:
                     return ""

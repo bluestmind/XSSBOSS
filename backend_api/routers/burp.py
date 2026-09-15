@@ -1,4 +1,5 @@
 """Burp Suite Integration endpoints."""
+from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
@@ -7,7 +8,10 @@ from pydantic import BaseModel
 from backend_api.db.session import get_db
 from backend_api.config import settings
 from backend_api.services.burp_service import BurpService
+from backend_api.services.burp_runtime_service import BurpRuntimeService
 from backend_api.services.recon_service import ReconService
+from backend_api.services.program_scope import ProgramScope
+from backend_api.models.target import Target
 from backend_api.utils.logger import logger
 
 router = APIRouter(prefix="/burp", tags=["burp"])
@@ -15,6 +19,58 @@ router = APIRouter(prefix="/burp", tags=["burp"])
 # Global queue for sending requests to Burp Suite Repeater
 repeater_queue = []
 findings_queue = []
+
+
+def _mark_extension_activity(
+    db: Session,
+    target_id: int,
+    activity_type: str,
+    item_count: int = 1,
+) -> None:
+    """Attribute Montoya traffic to the newest active run for honest telemetry."""
+    from backend_api.models.experiment import Experiment, ExperimentStatus
+
+    experiment = (
+        db.query(Experiment)
+        .filter(Experiment.target_id == target_id)
+        .filter(Experiment.status.in_([ExperimentStatus.PENDING, ExperimentStatus.RUNNING]))
+        .order_by(Experiment.id.desc())
+        .first()
+    )
+    if not experiment:
+        return
+    limits = dict(experiment.limits or {})
+    activity = dict(limits.get("burp_extension_activity") or {})
+    by_type = dict(activity.get("by_type") or {})
+    by_type[activity_type] = int(by_type.get(activity_type) or 0) + max(0, int(item_count))
+    activity.update({
+        "used": True,
+        "events": int(activity.get("events") or 0) + 1,
+        "items": int(activity.get("items") or 0) + max(0, int(item_count)),
+        "by_type": by_type,
+        "last_seen_at": datetime.now(UTC).isoformat(),
+    })
+    limits["burp_extension_activity"] = activity
+    experiment.limits = limits
+    db.commit()
+    try:
+        from backend_api.services.log_service import LogService
+
+        LogService.info(
+            "burp.extension",
+            f"Burp extension delivered {item_count} {activity_type} item(s)",
+            experiment_id=experiment.id,
+            target_id=target_id,
+            data={
+                "event_type": "burp_extension_activity",
+                "activity_type": activity_type,
+                "item_count": item_count,
+                "cumulative": activity,
+            },
+            db=db,
+        )
+    except Exception:
+        pass
 
 class SendToRepeaterRequest(BaseModel):
     finding_id: int
@@ -38,6 +94,65 @@ class ExtensionPushRequest(BaseModel):
     headers: Dict[str, str]
     body: Optional[str] = None
     response: Optional[Dict[str, Any]] = None
+
+class SitemapBulkItem(BaseModel):
+    method: str = "GET"
+    url: str
+    headers: Optional[Dict[str, str]] = None
+    body: Optional[str] = None
+    status_code: Optional[int] = None
+    response_body: Optional[str] = None
+
+class SitemapBulkPushRequest(BaseModel):
+    target_id: int
+    items: List[SitemapBulkItem]
+
+class CollaboratorGenerateRequest(BaseModel):
+    test_case_id: Optional[str] = None
+    prefix: Optional[str] = "t"
+
+class WebSocketPushRequest(BaseModel):
+    target_id: int
+    url: str
+    direction: str = "client_to_server"
+    payload: str
+    is_binary: bool = False
+
+
+@router.get("/runtime")
+def burp_runtime_status():
+    """Report whether the configured official Burp process and REST API are ready."""
+    try:
+        jar = BurpRuntimeService._official_jar(settings.BURP_EXECUTABLE)
+        state = BurpRuntimeService.process_state(jar)
+        return {
+            **state,
+            "api_ready": BurpRuntimeService.api_ready(
+                settings.BURP_API_URL, settings.BURP_API_KEY
+            ),
+            "auto_start": settings.BURP_AUTO_START,
+            "configured": True,
+        }
+    except RuntimeError as error:
+        return {
+            "running": False,
+            "api_ready": False,
+            "auto_start": settings.BURP_AUTO_START,
+            "configured": False,
+            "error": str(error),
+        }
+
+
+@router.post("/runtime/start")
+def start_burp_runtime():
+    """Start the configured official Burp JAR through Java(TM) javaw.exe."""
+    try:
+        return BurpRuntimeService.ensure_available(
+            settings.BURP_API_URL, settings.BURP_API_KEY
+        )
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
 
 @router.post("/xml")
 async def import_burp_xml(
@@ -159,6 +274,7 @@ def receive_extension_push(
             request_data=request_data,
             response_data=response_data
         )
+        _mark_extension_activity(db, request.target_id, "http_push")
         
         return {
             "status": "success",
@@ -259,7 +375,7 @@ def send_to_repeater(
     findings_queue.append({
         "id": finding.id,
         "name": f"XSS Boss: Verified {vuln_label} ({finding.param.location} parameter '{finding.param.name}')",
-        "severity": finding.severity.value,
+        "severity": finding.severity.value if hasattr(finding.severity, "value") else str(finding.severity),
         "confidence": "Certain",
         "url": url,
         "detail": finding.report_text or f"Verified {vuln_label} vulnerability found by XSS Boss.",
@@ -291,6 +407,26 @@ def get_findings_queue():
     temp = list(findings_queue)
     findings_queue.clear()
     return temp
+
+@router.get("/program-scope/{target_id}")
+def burp_program_scope(target_id: int, db: Session = Depends(get_db)):
+    """Emit a Burp Suite scope config for an imported program so Burp stays inside its boundary.
+
+    Load the returned ``burp_scope`` into Burp's target scope (or have the Montoya extension call
+    ``includeInScope`` on ``include_prefixes``) to route the whole program through Burp — proxy,
+    sitemap and scanner — without ever straying out of scope.
+    """
+    target = db.query(Target).filter(Target.id == target_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Target not found")
+    ps = ProgramScope.from_target(target)
+    return {
+        "target_id": target_id,
+        "summary": ps.summary(),
+        "burp_scope": ps.to_burp_scope(),
+        "include_prefixes": ps.burp_include_prefixes(),
+        "worklist": [a.to_dict() for a in ps.worklist()],
+    }
 
 @router.get("/scan-tasks")
 def get_burp_scan_tasks(
@@ -534,3 +670,97 @@ def report_collaborator_interaction(data: Dict[str, Any], db: Session = Depends(
         logger.error(f"Failed to auto-forward blind finding to Burp: {e}")
         
     return {"status": "created", "finding_id": finding.id}
+
+
+@router.post("/sitemap-bulk-push")
+def receive_sitemap_bulk_push(
+    request: SitemapBulkPushRequest,
+    db: Session = Depends(get_db)
+):
+    """Receive bulk sitemap tree export from Burp Suite Montoya Extension."""
+    try:
+        items_dict = [item.model_dump() for item in request.items]
+        result = BurpService.bulk_import_sitemap(
+            db=db,
+            target_id=request.target_id,
+            items=items_dict,
+        )
+        _mark_extension_activity(db, request.target_id, "sitemap_bulk", len(items_dict))
+        return result
+    except Exception as e:
+        logger.error(f"Error handling bulk sitemap push: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/websocket-push")
+def receive_websocket_push(
+    request: WebSocketPushRequest,
+    db: Session = Depends(get_db)
+):
+    """Receive live WebSocket message frame from Burp Suite Montoya Extension."""
+    try:
+        request_data = {
+            "method": "WS",
+            "url": request.url,
+            "headers": {},
+            "query": {},
+            "body": request.payload,
+            "json": None,
+            "direction": request.direction,
+            "is_binary": request.is_binary,
+        }
+        endpoint = ReconService.create_endpoint_from_request(
+            db=db,
+            target_id=request.target_id,
+            method="WS",
+            url=request.url,
+            request_data=request_data,
+            response_data=None,
+        )
+        _mark_extension_activity(db, request.target_id, "websocket_push")
+        return {
+            "status": "success",
+            "endpoint_id": endpoint.id,
+            "url_pattern": endpoint.url_pattern,
+            "direction": request.direction,
+        }
+    except Exception as e:
+        logger.error(f"Error receiving WebSocket push: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/collaborator-generate")
+def generate_collaborator_canary(
+    request: Optional[CollaboratorGenerateRequest] = None,
+):
+    """Generate a unique per-test-case Collaborator canary domain."""
+    prefix = (request.prefix if request else "t") or "t"
+    test_case_id = request.test_case_id if request else None
+
+    if not active_collaborator_payloads:
+        domain = f"{prefix}{test_case_id or 'default'}.oastify.com"
+        return {"canary": domain, "base_payload": None}
+
+    base = active_collaborator_payloads[-1]
+    if test_case_id:
+        canary = f"{prefix}{test_case_id}.{base}"
+    else:
+        canary = base
+
+    return {"canary": canary, "base_payload": base}
+
+
+@router.get("/collaborator-payloads")
+def list_collaborator_payloads():
+    """List all registered Burp Collaborator payloads."""
+    return {"payloads": list(active_collaborator_payloads), "count": len(active_collaborator_payloads)}
+
+
+@router.get("/session-status")
+def check_burp_session(
+    target_url: str = Query(...),
+    proxy_url: Optional[str] = Query(None),
+):
+    """Verify upstream Burp proxy reachability and authenticated session state."""
+    proxy = proxy_url or (settings.BURP_PROXY_URL if getattr(settings, "BURP_PROXY_WORKERS", False) else None)
+    return BurpService.check_session_health(target_url=target_url, proxy_url=proxy)

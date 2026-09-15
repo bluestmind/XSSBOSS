@@ -2,6 +2,7 @@
 from sqlalchemy import Column, String, Text, JSON, Integer, ForeignKey, DateTime
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+from backend_api.db.encrypted_json import EncryptedJSON
 from .base import BaseModel
 
 
@@ -15,7 +16,7 @@ class Endpoint(BaseModel):
     url_pattern = Column(String(2048), nullable=False, index=True)  # Normalized URL pattern
     sample_request_body = Column(JSON, nullable=True)
     sample_response_body = Column(Text, nullable=True)
-    auth_context = Column(JSON, nullable=True)  # Cookies/headers used for this endpoint
+    auth_context = Column(EncryptedJSON(), nullable=True)  # Encrypted live cookies/headers
     custom_steps = Column(JSON, nullable=True)  # Custom stateful sequence steps
     discovered_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     

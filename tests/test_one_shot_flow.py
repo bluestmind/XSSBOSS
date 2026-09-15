@@ -118,6 +118,29 @@ class OneShotFlowTests(unittest.TestCase):
         self.assertEqual(result.experiment_id, active.id)
         self.assertEqual(self.db.query(Experiment).count(), 1)
 
+    def test_one_shot_persists_structured_auth_identity(self):
+        auth_info = {
+            "default_identity": "user",
+            "identities": {"user": {"cookies": {"session": "authorized"}}},
+        }
+        result = create_scan(
+            ScanCreate(
+                url="https://auth.example.test/account",
+                authorized=True,
+                crawl=True,
+                auth_info=auth_info,
+                auth_identity="user",
+            ),
+            BackgroundTasks(),
+            self.db,
+        )
+        target = self.db.query(Target).filter(Target.id == result.target_id).one()
+        experiment = self.db.query(Experiment).filter(Experiment.id == result.experiment_id).one()
+        self.assertEqual(target.auth_info, auth_info)
+        self.assertEqual(experiment.limits["auth_identity"], "user")
+        endpoint = self.db.query(Endpoint).filter(Endpoint.target_id == target.id).one()
+        self.assertEqual(endpoint.auth_context["Cookie"], "session=authorized")
+
     def test_campaign_findings_are_not_leaked_between_runs(self):
         target = self._target()
         endpoint = Endpoint(target_id=target.id, method="GET", url_pattern="https://example.test/?q=")
