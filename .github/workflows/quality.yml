@@ -56,7 +56,7 @@ jobs:
       - run: pip install -r backend_api/requirements.txt
       - run: python -m playwright install --with-deps chromium
       - run: python tools/run_hard_lab_e2e.py --artifact reports/hard_lab_accuracy.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: hard-lab-browser-accuracy
@@ -208,7 +208,7 @@ jobs:
           python tools/observability_gate.py
           --start-server
           --artifact reports/observability_gate.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: scale-recovery-100x10000
