@@ -17,7 +17,7 @@ jobs:
       PROXY_ENABLED: "False"
       UPSTREAM_ROTATING_PROXY_ENABLED: "False"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
       - uses: actions/setup-node@v4
@@ -50,7 +50,7 @@ jobs:
       CAPTURE_SCREENSHOTS: hits
       CAPTURE_DOM_SNAPSHOT: hits
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
       - run: pip install -r backend_api/requirements.txt
@@ -82,7 +82,7 @@ jobs:
     env:
       DATABASE_URL: postgresql://xssboss:xssboss-test@localhost:5432/xssboss
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
       - run: pip install -r backend_api/requirements.txt
@@ -103,7 +103,7 @@ jobs:
       ORACLE_SERVER_URL: https://scanner.example.test
       GRAFANA_ADMIN_PASSWORD: ci-grafana-password-with-more-than-32-characters
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Validate production Compose rendering
         run: docker compose -f compose.production.yml config --quiet
       - name: Build production API image
@@ -146,7 +146,7 @@ jobs:
       PGPASSWORD: xssboss-scale-test
       AUDIT_MODE: celery
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
       - run: pip install -r backend_api/requirements.txt
