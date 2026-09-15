@@ -25,7 +25,7 @@ RUN playwright install --with-deps chromium \
 USER xssboss
 CMD ["celery", "-A", "browser_workers.worker:celery_app", "worker", "-Q", "browser", "--concurrency=1", "--loglevel=INFO"]
 
-FROM node:22-alpine AS ui-build
+FROM node:26-alpine AS ui-build
 WORKDIR /ui
 COPY ui/package*.json ./
 RUN npm ci
