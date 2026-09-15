@@ -27,7 +27,7 @@ class Finding(BaseModel):
     __tablename__ = "findings"
     
     endpoint_id = Column(Integer, ForeignKey("endpoints.id", ondelete="CASCADE"), nullable=False, index=True)
-    param_id = Column(Integer, ForeignKey("params.id", ondelete="CASCADE"), nullable=False, index=True)
+    param_id = Column(Integer, ForeignKey("params.id", ondelete="CASCADE"), nullable=True, index=True)
     context_id = Column(Integer, ForeignKey("contexts.id", ondelete="CASCADE"), nullable=True, index=True)
     sink_id = Column(Integer, ForeignKey("sinks.id", ondelete="CASCADE"), nullable=True, index=True)
     vuln_type = Column(String(80), default="xss", nullable=False, index=True)

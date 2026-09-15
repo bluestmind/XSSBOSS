@@ -24,6 +24,13 @@ def plan_research(experiment_id: int, db: Session = Depends(get_db)):
     return ResearchService.plan_experiment(db, experiment_id)
 
 
+@router.get("/llm/status")
+def get_llm_status():
+    from backend_api.services.llm_service import LLMService
+
+    return LLMService.provider_status()
+
+
 @router.get("/experiments/{experiment_id}")
 def get_research_state(
     experiment_id: int,
@@ -47,6 +54,7 @@ def get_research_state(
     return {
         "experiment_id": experiment.id,
         "summary": (experiment.limits or {}).get("research", {}),
+        "campaign_brain": (experiment.limits or {}).get("campaign_brain", {}),
         "hypotheses": [
             {
                 "id": row.id, "type": row.hypothesis_type, "title": row.title,

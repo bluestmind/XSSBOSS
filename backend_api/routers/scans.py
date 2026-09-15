@@ -7,6 +7,7 @@ import time
 from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from backend_api.db.session import SessionLocal, get_db
@@ -23,6 +24,7 @@ from backend_api.services.fuzzing_service import FuzzingService
 from backend_api.services.recon_service import ReconService
 from backend_api.services.target_service import TargetService
 from backend_api.services.run_state_service import RunStateService
+from backend_api.services.log_service import LogService
 from backend_api.utils.logger import logger
 from recon_engine.crawler import Crawler
 
@@ -32,6 +34,11 @@ BURP_TRIGGER_DEDUPE_SECONDS = 600
 COMMON_QUERY_PROBE_NAMES = ("q", "s", "search", "query", "keyword", "redirect", "url", "next")
 _burp_trigger_lock = Lock()
 _recent_burp_triggers = {}
+
+
+class InterventionResolution(BaseModel):
+    resolution: str = Field(default="operator resolved", max_length=500)
+    auth_info: dict | None = None
 
 
 @router.get("/health")
@@ -89,6 +96,39 @@ def _normalize_scan_url(url: str) -> str:
 
 def _experiment_limits(experiment: Experiment) -> dict:
     return experiment.limits if isinstance(experiment.limits, dict) else {}
+
+
+def _record_scan_progress(
+    db: Session,
+    experiment_id: int,
+    *,
+    phase: str,
+    tool: str,
+    message: str,
+    state: str = "working",
+    completed: int | None = None,
+    total: int | None = None,
+    overall_percent: float | None = None,
+    detail: str | None = None,
+    doing_status: str | None = None,
+    micro_state: dict | None = None,
+    river_stage: str | None = None,
+) -> None:
+    RunStateService.record_progress(
+        db,
+        experiment_id,
+        phase=phase,
+        tool=tool,
+        message=message,
+        state=state,
+        completed=completed,
+        total=total,
+        overall_percent=overall_percent,
+        detail=detail,
+        doing_status=doing_status,
+        micro_state=micro_state,
+        river_stage=river_stage,
+    )
 
 
 def _find_recent_same_url_experiment(db: Session, target_id: int, scan_url: str):
@@ -238,6 +278,15 @@ def _fail_scan(db: Session, experiment_id: int, error: Exception) -> None:
     if experiment.target:
         experiment.target.status = TargetStatus.RECON_ONLY
     db.commit()
+    _record_scan_progress(
+        db,
+        experiment_id,
+        phase="failed",
+        tool="scan orchestrator",
+        message="The scan stopped before completing its evidence plan",
+        state="error",
+        detail=str(error),
+    )
     running_stage = db.query(RunStage).filter(
         RunStage.experiment_id == experiment_id,
         RunStage.status == RunStageStatus.RUNNING,
@@ -286,9 +335,41 @@ def _run_scan_task(
     stage_owner = f"{socket.gethostname()}:{os.getpid()}"
     run_endpoint_ids: set[int] = set()
     initial_target_endpoint_ids: set[int] = set()
+    LogService.info(
+        "orchestrator",
+        f"🚀 Pipeline Scan Initiated: {url}",
+        detail=f"Target ID: {target_id} | Mode: {'Recon + Vuln Checks' if run_vuln_checks else 'Recon Only'} | Crawl: {crawl} | Passive Recon: {passive_recon}",
+        experiment_id=experiment_id,
+        target_id=target_id,
+        db=db,
+        data={
+            "event_type": "scan_started",
+            "url": url,
+            "crawl": crawl,
+            "passive_recon": passive_recon,
+            "max_depth": max_depth,
+            "max_pages": max_pages,
+            "vulnerability_checks": run_vuln_checks,
+            "burp_api_url": settings.BURP_API_URL,
+            "llm_enabled": settings.LLM_ENABLED,
+            "llm_model": settings.LLM_MODEL,
+            "capture_screenshots": settings.CAPTURE_SCREENSHOTS,
+            "capture_dom_snapshot": settings.CAPTURE_DOM_SNAPSHOT,
+            "browser_worker_concurrency": settings.BROWSER_WORKER_CONCURRENCY,
+            "max_test_cases": settings.MAX_TEST_CASES_PER_EXPERIMENT,
+        },
+    )
     # Auto-trigger Burp active scan
     try:
         RunStateService.ensure_pipeline(db, experiment_id)
+        _record_scan_progress(
+            db,
+            experiment_id,
+            phase="recon",
+            tool="scan orchestrator",
+            message="Preparing authorized scope and discovery tools",
+            overall_percent=1,
+        )
         recon_stage = db.query(RunStage).filter_by(
             experiment_id=experiment_id, name=RunStageName.RECON
         ).one()
@@ -299,6 +380,81 @@ def _run_scan_task(
             return
         experiment = db.query(Experiment).filter(Experiment.id == experiment_id).first()
         limits = _experiment_limits(experiment) if experiment else {}
+        if experiment and not isinstance(limits.get("llm_preflight"), dict):
+            from backend_api.services.llm_service import LLMService
+
+            llm_status = LLMService.provider_status()
+            llm_status["checked_at"] = datetime.now(UTC).isoformat()
+            updated_limits = dict(limits)
+            updated_limits["llm_preflight"] = llm_status
+            updated_limits["llm_mode"] = (
+                "available"
+                if llm_status.get("reachable") and llm_status.get("model_available")
+                else "deterministic_only"
+            )
+            if settings.LLM_ENABLED and updated_limits["llm_mode"] == "deterministic_only":
+                warnings = (
+                    updated_limits.get("warnings")
+                    if isinstance(updated_limits.get("warnings"), list)
+                    else []
+                )
+                warnings.append({
+                    "level": "warning",
+                    "phase": "llm",
+                    "message": "Local LLM was unavailable; AI advice was disabled for this run.",
+                    "detail": str(llm_status.get("error") or "Configured model is not installed.")[:500],
+                })
+                updated_limits["warnings"] = warnings[-12:]
+            experiment.limits = updated_limits
+            db.commit()
+            limits = updated_limits
+            LogService.emit(
+                "INFO" if updated_limits["llm_mode"] == "available" else "WARNING",
+                "llm.preflight",
+                (
+                    "Local LLM preflight passed"
+                    if updated_limits["llm_mode"] == "available"
+                    else "Local LLM preflight failed; deterministic-only mode selected"
+                ),
+                detail=llm_status.get("error"),
+                experiment_id=experiment_id,
+                target_id=target_id,
+                data={"event_type": "llm_preflight", **llm_status, "mode": updated_limits["llm_mode"]},
+                db=db,
+            )
+            if updated_limits["llm_mode"] == "deterministic_only":
+                _record_scan_progress(
+                    db,
+                    experiment_id,
+                    phase="recon",
+                    tool="local LLM preflight",
+                    message="Local LLM unavailable — deterministic engine remains active",
+                    state="warning",
+                    detail=str(llm_status.get("error") or "Configured model is unavailable.")[:500],
+                )
+        from backend_api.utils.proxy_health import resolve_worker_proxy
+
+        proxy_status = resolve_worker_proxy()
+        experiment = db.query(Experiment).filter(Experiment.id == experiment_id).first()
+        if experiment:
+            updated_limits = dict(_experiment_limits(experiment))
+            updated_limits["proxy_preflight"] = proxy_status
+            experiment.limits = updated_limits
+            db.commit()
+            limits = updated_limits
+        LogService.emit(
+            "WARNING" if proxy_status.get("fallback_direct") else "INFO",
+            "proxy.preflight",
+            (
+                "Configured proxy unavailable; direct fallback selected"
+                if proxy_status.get("fallback_direct")
+                else f"Network path selected: {proxy_status.get('source', 'direct')}"
+            ),
+            experiment_id=experiment_id,
+            target_id=target_id,
+            data={"event_type": "proxy_preflight", **proxy_status},
+            db=db,
+        )
         run_endpoint_ids.update(int(value) for value in limits.get("endpoint_ids", []) if value is not None)
         initial_target_endpoint_ids = {
             endpoint_id for (endpoint_id,) in
@@ -314,6 +470,7 @@ def _run_scan_task(
                 api_url=settings.BURP_API_URL,
                 target_urls=[url],
                 api_key=settings.BURP_API_KEY,
+                startup_timeout_seconds=settings.BURP_SCAN_STARTUP_TIMEOUT_SECONDS,
             )
             if experiment and burp_scan.get("task_id"):
                 updated_limits = dict(limits)
@@ -335,10 +492,96 @@ def _run_scan_task(
                 experiment.limits = updated_limits
                 db.commit()
                 logger.info(f"Automatically triggered Burp Active Scan on target URL: {url}")
+                LogService.info(
+                    "burp",
+                    "Burp REST scan task started",
+                    experiment_id=experiment_id,
+                    target_id=target_id,
+                    data={
+                        "event_type": "burp_task_started",
+                        "task_id": burp_scan.get("task_id"),
+                        "status": burp_scan.get("status"),
+                        "seed_urls": burp_scan.get("seed_urls") or [url],
+                        "preflights": burp_scan.get("preflights") or [],
+                    },
+                    db=db,
+                )
             else:
+                if experiment:
+                    updated_limits = dict(limits)
+                    updated_limits["burp_scan_started_at"] = datetime.now(UTC).isoformat()
+                    updated_limits["burp_status"] = str(burp_scan.get("status") or "not_started")
+                    updated_limits["burp_scan_message"] = str(
+                        burp_scan.get("message") or "Burp returned no scan task id."
+                    )[:500]
+                    warnings = (
+                        updated_limits.get("warnings")
+                        if isinstance(updated_limits.get("warnings"), list)
+                        else []
+                    )
+                    warnings.append({
+                        "level": "warning",
+                        "phase": "burp",
+                        "message": "Burp did not start; the run continued with local tools only.",
+                        "detail": updated_limits["burp_scan_message"],
+                    })
+                    updated_limits["warnings"] = warnings[-12:]
+                    experiment.limits = updated_limits
+                    db.commit()
+                    LogService.warn(
+                        "burp",
+                        "Burp returned no scan task; continuing local-only",
+                        detail=updated_limits["burp_scan_message"],
+                        experiment_id=experiment_id,
+                        target_id=target_id,
+                        data={"event_type": "burp_task_not_started", "response": burp_scan},
+                        db=db,
+                    )
                 logger.info("Burp Active Scan was not started; continuing with the local one-shot pipeline")
     except Exception as burp_scan_err:
         logger.warning(f"Auto Burp active scan trigger failed (is Burp REST running?): {burp_scan_err}")
+        experiment = db.query(Experiment).filter(Experiment.id == experiment_id).first()
+        if experiment:
+            updated_limits = _experiment_limits(experiment)
+            updated_limits["burp_scan_started_at"] = datetime.now(UTC).isoformat()
+            updated_limits["burp_status"] = "unavailable"
+            updated_limits["burp_scan_message"] = str(burp_scan_err)[:500]
+            warnings = (
+                updated_limits.get("warnings")
+                if isinstance(updated_limits.get("warnings"), list)
+                else []
+            )
+            warnings.append({
+                "level": "warning",
+                "phase": "burp",
+                "message": "Burp REST was unavailable; the run continued with local tools only.",
+                "detail": str(burp_scan_err)[:500],
+            })
+            updated_limits["warnings"] = warnings[-12:]
+            experiment.limits = updated_limits
+            db.commit()
+            _record_scan_progress(
+                db,
+                experiment_id,
+                phase="recon",
+                tool="Burp Suite REST",
+                message="Burp unavailable — continuing in local-only mode",
+                state="warning",
+                detail=str(burp_scan_err)[:500],
+            )
+            LogService.error(
+                "burp",
+                "Burp REST unavailable; continuing local-only",
+                detail=str(burp_scan_err),
+                experiment_id=experiment_id,
+                target_id=target_id,
+                data={
+                    "event_type": "burp_unavailable",
+                    "api_url": settings.BURP_API_URL,
+                    "fallback": "local_pipeline",
+                },
+                db=db,
+            )
     try:
         imported = 0
         recon_signals: list[dict] = []
@@ -351,6 +594,18 @@ def _run_scan_task(
                 logger.info("Coordinating scan: polling Burp crawl phase to complete before local fuzzing...")
                 max_polls = 18  # 3 minutes max wait for crawl
                 for poll in range(max_polls):
+                    _record_scan_progress(
+                        db,
+                        experiment_id,
+                        phase="burp",
+                        tool="Burp REST coordinator",
+                        message="Waiting for Burp crawl inventory",
+                        state="waiting",
+                        completed=poll + 1,
+                        total=max_polls,
+                        overall_percent=2 + (3 * (poll + 1) / max_polls),
+                        detail="The local pipeline will continue when Burp leaves crawling/paused state or the wait limit expires.",
+                    )
                     # Fetch status & update database
                     _sync_burp_task(db, target_id, experiment, poll_attempts=1)
                     db.refresh(experiment)
@@ -367,23 +622,126 @@ def _run_scan_task(
 
         if crawl:
             try:
+                def _record_crawler_decision(event: dict) -> None:
+                    event_type = str(event.get("event_type") or "crawler_event")
+                    messages = {
+                        "crawler_url_selected": "Crawler selected URL from priority frontier",
+                        "crawler_page_complete": "Crawler completed page feature analysis",
+                        "crawler_template_skipped": "Crawler skipped a template-equivalent URL",
+                        "crawler_feature_duplicate": "Crawler avoided duplicate expensive interactions",
+                        "crawler_page_timeout": "Crawler page navigation timed out",
+                        "crawler_page_error": "Crawler page analysis failed",
+                        "crawler_frontier_complete": "Crawler priority frontier completed",
+                        "crawler_rate_wait_started": "Crawler entered the host rate limiter",
+                        "crawler_navigation_complete": "Browser navigation completed",
+                        "crawler_links_extracted": "Crawler extracted route candidates",
+                        "crawler_interactions_complete": "Safe SPA interaction pass completed",
+                        "crawler_bundle_started": "Client bundle analysis started",
+                        "crawler_bundle_complete": "Client bundle analysis completed",
+                        "crawler_bundle_unavailable": "Client bundle content was unavailable",
+                        "crawler_bundle_error": "Client bundle analysis failed",
+                        "crawler_interaction_budget_exhausted": "SPA interaction time budget exhausted",
+                        "crawler_bundle_budget_exhausted": "Client bundle analysis time budget exhausted",
+                    }
+                    level = "ERROR" if event_type == "crawler_page_error" else (
+                        "WARNING" if event_type == "crawler_page_timeout" else "INFO"
+                    )
+                    LogService.emit(
+                        level,
+                        "crawler.decision",
+                        messages.get(event_type, event_type.replace("_", " ").title()),
+                        detail=str(event.get("url") or event.get("stop_reason") or "")[:1000] or None,
+                        experiment_id=experiment_id,
+                        target_id=target_id,
+                        data=event,
+                        db=db,
+                    )
+
                 crawler = Crawler(
                     base_url=url,
                     max_depth=max_depth,
                     max_pages=max_pages,
                     delay=0.25,
                     follow_external=False,
+                    auth_identity=_experiment_limits(experiment).get("auth_identity") if experiment else None,
+                    progress_callback=lambda page_url, depth, visited, limit: _record_scan_progress(
+                        db,
+                        experiment_id,
+                        phase="recon",
+                        tool="Chromium crawler",
+                        message=f"Crawling page {visited} of at most {limit}",
+                        completed=visited,
+                        total=limit,
+                        overall_percent=5 + (15 * visited / max(1, limit)),
+                        detail=f"Depth {depth}: {page_url}",
+                        doing_status=f"Recon Rapids: Crawling page {visited}/{limit} ({page_url})",
+                        micro_state={
+                            "action": "crawl_page",
+                            "endpoint": page_url,
+                            "substep": f"Depth {depth} crawl",
+                            "result": f"Page {visited}/{limit}",
+                        },
+                        river_stage="recon",
+                    ),
+                    decision_callback=_record_crawler_decision,
                 )
                 crawled = crawler.crawl_to_database(target_id, db)
                 imported += crawled
                 run_endpoint_ids.update(crawler.saved_endpoint_ids)
                 recon_signals.extend(crawler.research_signals)
+                _record_scan_progress(
+                    db,
+                    experiment_id,
+                    phase="recon",
+                    tool="priority Chromium crawler",
+                    message="Feature-aware crawl frontier completed",
+                    detail=(
+                        f"Visited {len(crawler.visited)} representative page(s), found "
+                        f"{len(crawler.route_template_counts)} route template(s), and skipped "
+                        f"{len(crawler.skipped_template_urls)} template-equivalent URL(s)."
+                    ),
+                    overall_percent=20,
+                    doing_status="Recon Rapids: feature-aware crawl complete",
+                    micro_state={
+                        "action": "crawl_complete",
+                        "result": {
+                            "visited_pages": len(crawler.visited),
+                            "route_templates": len(crawler.route_template_counts),
+                            "template_urls_skipped": len(crawler.skipped_template_urls),
+                            "frontier_peak": crawler.frontier_peak,
+                        },
+                    },
+                    river_stage="recon",
+                )
                 logger.info(f"Imported {crawled} endpoint(s) from crawler for target {target_id}")
+                if crawler.interventions:
+                    from backend_api.services.human_intervention_service import HumanInterventionService
+
+                    for intervention in crawler.interventions:
+                        HumanInterventionService.raise_intervention(
+                            db,
+                            experiment_id,
+                            kind=intervention.get("kind") or "authentication_blocked",
+                            reason=intervention.get("reason") or "Authentication requires operator input",
+                            identity=intervention.get("identity"),
+                            url=intervention.get("url"),
+                            workflow=intervention.get("workflow"),
+                        )
+                    logger.warning("Campaign %s paused with %s operator intervention(s)", experiment_id, len(crawler.interventions))
+                    return
             except Exception as crawl_err:
                 logger.warning(f"Crawler failed for scan target {target_id}: {crawl_err}", exc_info=True)
 
             if passive_recon:
                 try:
+                    _record_scan_progress(
+                        db,
+                        experiment_id,
+                        phase="recon",
+                        tool="passive recon analyzer",
+                        message="Mining scripts, routes, and passive attack-surface signals",
+                        overall_percent=18,
+                    )
                     from recon_engine.advanced_recon import AdvancedRecon
                     adv = AdvancedRecon(db, target_id)
                     adv_crawled = adv.run_all(url)
@@ -412,13 +770,63 @@ def _run_scan_task(
         experiment = db.query(Experiment).filter(Experiment.id == experiment_id).first()
         if experiment:
             _persist_run_scope(db, experiment, run_endpoint_ids, imported)
+            workflow_summary = {}
+            try:
+                from backend_api.services.workflow_discovery_service import WorkflowDiscoveryService
+
+                _record_scan_progress(
+                    db,
+                    experiment_id,
+                    phase="workflow_discovery",
+                    tool="form workflow planner",
+                    message="Mapping reusable safe form workflows",
+                    detail=f"Analyzing {len(run_endpoint_ids)} in-run endpoint(s); each captured page is parsed once.",
+                    overall_percent=20.5,
+                    river_stage="recon",
+                )
+                workflow_summary = WorkflowDiscoveryService.discover_for_experiment(
+                    db, experiment_id, run_endpoint_ids
+                )
+                LogService.info(
+                    "workflow.discovery",
+                    "Safe form workflow discovery completed",
+                    experiment_id=experiment_id,
+                    target_id=target_id,
+                    data={"event_type": "workflow_discovery_complete", **workflow_summary},
+                    db=db,
+                )
+                logger.info(
+                    "Workflow discovery attached %s validated flow(s) for experiment %s",
+                    workflow_summary.get("attached", 0),
+                    experiment_id,
+                )
+            except Exception as workflow_error:
+                logger.warning("Autonomous workflow discovery failed: %s", workflow_error, exc_info=True)
             research_summary = {}
             if bool(_experiment_limits(experiment).get("autonomous_research", True)):
                 try:
                     from backend_api.services.research_service import ResearchService
 
+                    _record_scan_progress(
+                        db,
+                        experiment_id,
+                        phase="research",
+                        tool="attack-surface research planner",
+                        message="Building prioritized cross-bug hypotheses",
+                        detail="Connecting endpoints, parameters, contexts, filters, sinks, and client-bundle evidence.",
+                        overall_percent=21,
+                        river_stage="params",
+                    )
                     research_summary = ResearchService.plan_experiment(
                         db, experiment_id, recon_signals=recon_signals
+                    )
+                    LogService.info(
+                        "research.planner",
+                        "Attack-surface hypothesis plan completed",
+                        experiment_id=experiment_id,
+                        target_id=target_id,
+                        data={"event_type": "research_plan_complete", **research_summary},
+                        db=db,
                     )
                     logger.info(
                         "Research planner built %s hypotheses over %s graph nodes for experiment %s",
@@ -436,6 +844,7 @@ def _run_scan_task(
                     "endpoint_count": len(run_endpoint_ids),
                     "param_count": _endpoint_param_count(db, run_endpoint_ids),
                     "imported_count": imported,
+                    "workflows": workflow_summary,
                     "research": research_summary,
                 },
             )
@@ -467,6 +876,14 @@ def _run_scan_task(
             return
 
         RunStateService.claim_stage(db, experiment_id, RunStageName.PROFILING, stage_owner)
+        _record_scan_progress(
+            db,
+            experiment_id,
+            phase="profiling",
+            tool="context profiler",
+            message="Classifying parameters, reflection contexts, filters, and sinks",
+            overall_percent=20,
+        )
         fuzzer = FuzzingService(db)
         result = fuzzer.run_experiment(experiment_id)
         if result.get("status") == ExperimentStatus.FAILED.value:
@@ -513,6 +930,59 @@ def _run_scan_task(
         db.close()
 
 
+@router.get("/{experiment_id}/interventions")
+def list_scan_interventions(experiment_id: int, db: Session = Depends(get_db)):
+    """Return open MFA/CAPTCHA/login/workflow actions for a paused campaign."""
+    from backend_api.services.human_intervention_service import HumanInterventionService
+
+    try:
+        return {"items": HumanInterventionService.list_open(db, experiment_id)}
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.post("/{experiment_id}/interventions/{intervention_id}/resolve")
+def resolve_scan_intervention(
+    experiment_id: int,
+    intervention_id: str,
+    request: InterventionResolution,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Apply refreshed auth state and resume the exact paused one-shot campaign."""
+    from backend_api.services.human_intervention_service import HumanInterventionService
+
+    experiment = db.query(Experiment).filter(Experiment.id == experiment_id).first()
+    if not experiment:
+        raise HTTPException(status_code=404, detail=f"Experiment {experiment_id} not found")
+    if request.auth_info is not None:
+        experiment.target.auth_info = request.auth_info
+        db.commit()
+    try:
+        resolved = HumanInterventionService.resolve(
+            db, experiment_id, intervention_id, request.resolution
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+    open_items = HumanInterventionService.list_open(db, experiment_id)
+    if not open_items:
+        limits = _experiment_limits(experiment)
+        request_url = str(limits.get("request_url") or experiment.target.base_url)
+        background_tasks.add_task(
+            _run_scan_task,
+            experiment.id,
+            experiment.target_id,
+            request_url,
+            bool(limits.get("crawl", True)),
+            bool(limits.get("passive_recon", False)),
+            int(limits.get("max_depth", 1)),
+            int(limits.get("max_pages", 100)),
+            bool(limits.get("vuln_checks_enabled", True)),
+        )
+    return {"resolved": resolved, "remaining_open": len(open_items), "resumed": not open_items}
+
+
 @router.post("/", response_model=ScanResponse, status_code=201)
 def create_scan(scan: ScanCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Create a target from a URL and start recon-only or full vuln scanning."""
@@ -540,6 +1010,8 @@ def create_scan(scan: ScanCreate, background_tasks: BackgroundTasks, db: Session
     if target:
         target.status = target_status
         target.scope_tags = target.scope_tags or {"allowed_hosts": [host]}
+        if scan.auth_info is not None:
+            target.auth_info = scan.auth_info
         db.commit()
         db.refresh(target)
     else:
@@ -551,12 +1023,12 @@ def create_scan(scan: ScanCreate, background_tasks: BackgroundTasks, db: Session
                 "notes": "Created from one-shot scan.",
                 "bounty_platform": "manual",
                 "scope_tags": {"allowed_hosts": [host]},
-                "auth_info": {},
+                "auth_info": scan.auth_info or {},
                 "status": target_status,
             },
         )
 
-    recent_experiment = _find_recent_same_url_experiment(db, target.id, scan.url)
+    recent_experiment = None if scan.force_new else _find_recent_same_url_experiment(db, target.id, scan.url)
     if recent_experiment:
         return ScanResponse(
             target_id=target.id,
@@ -564,8 +1036,8 @@ def create_scan(scan: ScanCreate, background_tasks: BackgroundTasks, db: Session
             endpoint_count=db.query(Endpoint).filter(Endpoint.target_id == target.id).count(),
             status=recent_experiment.status.value,
             message=(
-                f"Reusing recent scan for {host}. "
-                "Wait a few minutes or remove the previous run before launching another Burp crawl for the same URL."
+                f"Reusing active or paused scan for {host}. "
+                "Resume that run, or submit force_new=true to retain it and launch a separate diagnostic run."
             ),
         )
 
@@ -595,12 +1067,25 @@ def create_scan(scan: ScanCreate, background_tasks: BackgroundTasks, db: Session
                 "max_depth": scan.max_depth,
                 "max_pages": scan.max_pages,
                 "reused_target": reused_target,
+                "auth_identity": scan.auth_identity,
             },
         },
     )
     RunStateService.ensure_pipeline(db, experiment.id)
     RunStateService.add_endpoints(db, experiment.id, [endpoint.id], "submitted_url")
     experiment = ExperimentService.start_experiment(db, experiment.id)
+    _record_scan_progress(
+        db,
+        experiment.id,
+        phase="queued",
+        tool="scan orchestrator",
+        message="Scan accepted and queued for discovery",
+        state="waiting",
+        completed=0,
+        total=1,
+        overall_percent=0,
+        detail="The first crawler heartbeat should appear shortly.",
+    )
 
     scan_payload = {
         "experiment_id": experiment.id,
@@ -632,3 +1117,32 @@ def create_scan(scan: ScanCreate, background_tasks: BackgroundTasks, db: Session
         status=experiment.status.value,
         message=message,
     )
+
+
+@router.get("/live-screen")
+def get_live_browser_screen():
+    """Get the current live browser vision preview frame and active execution telemetry."""
+    import json
+    import time
+    from pathlib import Path
+    
+    screenshots_dir = Path(__file__).resolve().parent.parent.parent / "screenshots"
+    live_img = screenshots_dir / "live_latest.png"
+    meta_path = screenshots_dir / "live_metadata.json"
+    
+    metadata: Dict[str, Any] = {}
+    if meta_path.exists():
+        try:
+            metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            metadata = {}
+            
+    available = live_img.exists()
+    ts = int(time.time() * 1000)
+    image_url = f"/screenshots/live_latest.png?t={ts}" if available else None
+    
+    return {
+        "available": available,
+        "image_url": image_url,
+        "metadata": metadata,
+    }

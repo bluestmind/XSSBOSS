@@ -15,6 +15,7 @@ class RoleContext(BaseModel):
     """Authorized role/session context for revisit verification."""
 
     label: str = Field(default="same-session", max_length=80)
+    identity: Optional[str] = Field(default=None, max_length=80)
     auth_context: Dict[str, Any] = Field(default_factory=dict)
 
 

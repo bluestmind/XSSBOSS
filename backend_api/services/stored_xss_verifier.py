@@ -16,6 +16,7 @@ from backend_api.models.test_case import TestCase, TestCaseStatus
 from backend_api.utils.impact_scorer import ImpactScorer
 from backend_api.utils.scope_guard import is_endpoint_in_scope
 from backend_api.utils.tokenizer import Tokenizer
+from backend_api.utils.log_serializer import serialize_execution_logs
 
 
 class StoredXSSVerifier:
@@ -51,7 +52,10 @@ class StoredXSSVerifier:
 
         token = Tokenizer.generate_token()
         payload = payload_template.replace("{{TOKEN}}", token)
-        role_contexts = StoredXSSVerifier._normalize_roles(role_contexts)
+        role_contexts = StoredXSSVerifier._normalize_roles(
+            role_contexts,
+            submit_endpoint.target.auth_info if submit_endpoint.target else {},
+        )
 
         submit_result = StoredXSSVerifier._submit_payload(
             endpoint=submit_endpoint,
@@ -126,6 +130,8 @@ class StoredXSSVerifier:
                         "json": None,
                         "token": token,
                         "payload": payload,
+                        "target_base_url": submit_endpoint.target.base_url if submit_endpoint.target else revisit_url,
+                        "auth_spec": role.get("auth_spec"),
                     }
 
                     result = executor.execute_test_case(
@@ -135,10 +141,15 @@ class StoredXSSVerifier:
                     oracle_hit = bool(result.get("oracle_hit"))
                     execution = Execution(
                         test_case_id=test_case.id,
+                        attempt_no=1,
                         browser_worker_id=f"stored-verifier:{role['label']}",
                         oracle_status=OracleStatus.HIT if oracle_hit else OracleStatus.MISSED,
                         oracle_token=token if oracle_hit else None,
-                        logs=str(result.get("logs", {})),
+                        logs=serialize_execution_logs(
+                            result.get("logs", {}),
+                            test_case_id=test_case.id,
+                            attempt_no=1,
+                        ),
                         screenshot_path=result.get("screenshot_path"),
                         dom_snapshot=result.get("dom_snapshot"),
                         duration_ms=result.get("duration_ms"),
@@ -191,16 +202,40 @@ class StoredXSSVerifier:
             executor.stop()
 
     @staticmethod
-    def _normalize_roles(role_contexts: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    def _normalize_roles(
+        role_contexts: Optional[List[Dict[str, Any]]],
+        auth_info: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        from backend_api.services.auth_session_service import AuthSessionService
+
         if not role_contexts:
-            return [{"label": "same-session", "auth_context": {}}]
+            if auth_info:
+                return [
+                    {
+                        "label": label,
+                        "auth_context": AuthSessionService.request_context(auth_info, label),
+                        "auth_spec": AuthSessionService.material(auth_info, label).browser_spec(),
+                    }
+                    for label in AuthSessionService.identity_labels(auth_info)
+                ]
+            return [{"label": "same-session", "auth_context": {}, "auth_spec": None}]
 
         normalized = []
         for index, role in enumerate(role_contexts):
-            label = str(role.get("label") or f"role-{index + 1}")
+            identity = role.get("identity")
+            label = str(role.get("label") or identity or f"role-{index + 1}")
+            configured_context = (
+                AuthSessionService.request_context(auth_info, str(identity))
+                if identity and auth_info else {}
+            )
+            configured_context.update(role.get("auth_context") or {})
             normalized.append({
                 "label": label,
-                "auth_context": role.get("auth_context") or {},
+                "auth_context": configured_context,
+                "auth_spec": (
+                    AuthSessionService.material(auth_info, str(identity)).browser_spec()
+                    if identity and auth_info else role.get("auth_spec")
+                ),
             })
         return normalized
 
@@ -308,16 +343,23 @@ class StoredXSSVerifier:
         else:
             raise ValueError(f"Unsupported stored verification parameter location: {param.location}")
 
-        response = httpx.request(
-            method=endpoint.method,
-            url=url,
-            headers=headers,
-            cookies=cookies,
-            params=params,
-            data=data,
-            json=json_data,
-            follow_redirects=True,
-            timeout=15,
+        from backend_api.config import settings
+        from backend_api.utils.rate_limiter import rate_limited_call
+
+        response = rate_limited_call(
+            url,
+            lambda: httpx.request(
+                method=endpoint.method,
+                url=url,
+                headers=headers,
+                cookies=cookies,
+                params=params,
+                data=data,
+                json=json_data,
+                follow_redirects=False,
+                verify=not settings.ALLOW_INSECURE_TLS,
+                timeout=15,
+            ),
         )
 
         return {

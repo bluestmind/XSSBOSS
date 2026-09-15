@@ -40,6 +40,12 @@ knowledge without mixing tenant data.
   `co_occurs_with` evidence, never a confirmed flow.
 - A finding becomes supported only through browser-oracle execution, sink
   telemetry, or independent direct-auditor evidence.
+- Runtime-lineage `value_influence` is a fixed-order A/A/B prioritization signal.
+  It is order-confounded and does not confirm value flow, script execution, or XSS.
+  Only the execution oracle confirms XSS.
+- A lineage HMAC authenticates the trusted worker's exact redacted projection and
+  its test-case/attempt binding. It detects tampering and replay; it does not make
+  hostile-page telemetry a statement of ground truth.
 - Client-secret candidates are SHA-256 fingerprinted; raw values and surrounding
   snippets are not persisted by the bundle analyzer.
 - Each browser execution is idempotent and linked to content-addressed request,
@@ -53,6 +59,13 @@ navigation. Advanced WebView, IPC, opener, cookie, cache, and postMessage probes
 are capability canaries: they call the local oracle when a boundary is present
 but do not execute OS commands, exfiltrate document data, overwrite session
 cookies, evaluate hash content, or run unbounded loops.
+
+Controlled lineage arms are navigation-only. Each fresh Playwright context blocks
+service workers and active networking APIs, permits one same-origin and same-path
+top-level navigation, and restricts page-owned subresources to safe methods and a
+bounded allowlist. Cross-origin or subframe navigation, state-changing methods,
+excess requests, blocked network attempts, and guard failures invalidate the arm;
+the coordinator then refuses to emit a `value_influence` upgrade.
 
 The next maturity step is a policy engine that separates passive, safe-active,
 and explicitly destructive techniques, with per-target authorization and

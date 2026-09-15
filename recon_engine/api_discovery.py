@@ -12,7 +12,7 @@ import json
 import re
 import urllib.parse
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 try:
     import httpx
@@ -20,6 +20,8 @@ except ImportError:
     httpx = None
 
 from backend_api.utils.logger import logger
+from backend_api.config import settings
+from backend_api.utils.rate_limiter import rate_limited_call
 
 
 @dataclass
@@ -97,29 +99,53 @@ CANDIDATE_OPENAPI_PATHS = [
 class APIDiscovery:
     """Discovers and parses GraphQL, OpenAPI, and modern RPC APIs."""
 
-    def __init__(self, base_url: str, timeout: float = 2.0):
+    def __init__(
+        self,
+        base_url: str,
+        timeout: float = 2.0,
+        request_headers: Optional[Dict[str, str]] = None,
+        response_guard: Optional[Callable[[int, str, str], None]] = None,
+    ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.request_headers = dict(request_headers or {})
+        self.response_guard = response_guard
 
     def _fetch_post(self, url: str, json_data: Dict[str, Any]) -> Optional[Any]:
         """HTTP POST supporting httpx and urllib."""
         if httpx:
             try:
-                return httpx.post(
+                headers = {
+                    "User-Agent": "Mozilla/5.0",
+                    "Content-Type": "application/json",
+                    **self.request_headers,
+                }
+                response = rate_limited_call(
                     url,
-                    json=json_data,
-                    timeout=self.timeout,
-                    headers={"User-Agent": "Mozilla/5.0", "Content-Type": "application/json"},
-                    follow_redirects=True,
+                    lambda: httpx.post(
+                        url,
+                        json=json_data,
+                        timeout=self.timeout,
+                        verify=not settings.ALLOW_INSECURE_TLS,
+                        headers=headers,
+                        follow_redirects=False,
+                    ),
                 )
+                if self.response_guard:
+                    self.response_guard(response.status_code, str(response.url), response.text)
+                return response
             except Exception:
-                pass
+                return None
+        if self.request_headers:
+            # urllib's redirect handler may copy caller-supplied bearer headers to a
+            # different origin.  Authenticated discovery therefore fails closed here.
+            return None
         try:
             import urllib.request
             req = urllib.request.Request(
                 url,
                 data=json.dumps(json_data).encode("utf-8"),
-                headers={"User-Agent": "Mozilla/5.0", "Content-Type": "application/json"}
+                headers={"User-Agent": "Mozilla/5.0", "Content-Type": "application/json", **self.request_headers}
             )
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 raw = resp.read()
@@ -137,19 +163,33 @@ class APIDiscovery:
         """HTTP GET supporting httpx and urllib."""
         if httpx:
             try:
-                return httpx.get(
+                headers = {
+                    "User-Agent": "Mozilla/5.0",
+                    "Accept": "application/json, text/yaml",
+                    **self.request_headers,
+                }
+                response = rate_limited_call(
                     url,
-                    timeout=self.timeout,
-                    headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json, text/yaml"},
-                    follow_redirects=True,
+                    lambda: httpx.get(
+                        url,
+                        timeout=self.timeout,
+                        verify=not settings.ALLOW_INSECURE_TLS,
+                        headers=headers,
+                        follow_redirects=False,
+                    ),
                 )
+                if self.response_guard:
+                    self.response_guard(response.status_code, str(response.url), response.text)
+                return response
             except Exception:
-                pass
+                return None
+        if self.request_headers:
+            return None
         try:
             import urllib.request
             req = urllib.request.Request(
                 url,
-                headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json, text/yaml"}
+                headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json, text/yaml", **self.request_headers}
             )
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 raw = resp.read()

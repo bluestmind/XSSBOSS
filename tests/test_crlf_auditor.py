@@ -16,14 +16,14 @@ class TestCRLFInjectionAuditor(unittest.TestCase):
         self.assertIn("url", CRLFInjectionAuditor.CANDIDATE_PARAMS)
         self.assertIn("lang", CRLFInjectionAuditor.CANDIDATE_PARAMS)
 
-    @patch("httpx.Client.request")
-    def test_header_injection_detected(self, mock_request):
+    @patch("httpx.Client.get")
+    def test_header_injection_detected(self, mock_get):
         """Header injection is detected when custom canary header reflects in response headers."""
         mock_resp = MagicMock(spec=httpx.Response)
         mock_resp.status_code = 302
         mock_resp.headers = {"Location": "/home", "X-XSSBoss-Injected": "canary_header_ok"}
         mock_resp.text = ""
-        mock_request.return_value = mock_resp
+        mock_get.return_value = mock_resp
 
         ep = Endpoint(id=1, url_pattern="https://example.com/redirect", method="GET")
         param = Param(id=1, endpoint_id=1, name="url", location="query")
@@ -35,14 +35,14 @@ class TestCRLFInjectionAuditor(unittest.TestCase):
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0].vuln_type, "header_injection")
 
-    @patch("httpx.Client.request")
-    def test_response_splitting_detected(self, mock_request):
+    @patch("httpx.Client.get")
+    def test_response_splitting_detected(self, mock_get):
         """Double CRLF injecting HTML into the response body is flagged as response splitting XSS."""
         mock_resp = MagicMock(spec=httpx.Response)
         mock_resp.status_code = 200
         mock_resp.headers = {"Content-Type": "text/html"}
         mock_resp.text = "HTTP/1.1 200 OK\r\n\r\n<svg/onload=__XSS__('crlf_split')>"
-        mock_request.return_value = mock_resp
+        mock_get.return_value = mock_resp
 
         ep = Endpoint(id=1, url_pattern="https://example.com/set-lang", method="GET")
         param = Param(id=1, endpoint_id=1, name="lang", location="query")
@@ -55,6 +55,26 @@ class TestCRLFInjectionAuditor(unittest.TestCase):
         self.assertEqual(findings[0].vuln_type, "response_splitting_xss")
         self.assertEqual(findings[0].severity, Severity.HIGH)
 
+    @patch("httpx.Client.get")
+    def test_cdn_location_strip_xss_detected(self, mock_get):
+        mock_resp = MagicMock(spec=httpx.Response)
+        mock_resp.status_code = 301
+        mock_resp.headers = {"CDN-Cache-Control": 'private="Location"'}
+        mock_resp.text = "<svg/onload=__XSS__('crlf_cdn_strip')>"
+        mock_get.return_value = mock_resp
+
+        ep = Endpoint(id=1, url_pattern="https://example.com/redirect", method="GET")
+        param = Param(id=1, endpoint_id=1, name="next", location="query")
+        ep.params = [param]
+
+        db = MagicMock()
+        findings = CRLFInjectionAuditor.audit_endpoints(db, [ep])
+
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].vuln_type, "cdn_location_strip_xss")
+        self.assertEqual(findings[0].severity, Severity.HIGH)
+
 
 if __name__ == "__main__":
     unittest.main()
+

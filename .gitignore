@@ -1,20 +1,81 @@
+# Python & Virtual Environments
 .venv/
 __pycache__/
 *.pyc
 *.pyo
+.pytest_cache/
+.pytest_tmp*
+
+# Databases
 *.db
 *.db-shm
 *.db-wal
+
+# Sensitive Credentials & Environment Configs
 .env
+.env.*
+!.env.example
+!.env.production.example
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
+*.kdbx
+id_rsa*
+credentials.json
+service_account.json
+burp_upstream_proxy.json
+proxies.txt
+test_users_audit.csv
+scraped_urls.txt
+
+# Browser Profiles & Scraper Data
+chatgpt_scraper_profile/
+medium_scraper_profile/
+*_scraper_profile/
 .playwright-browsers/
 screenshots/
-*.log
-node_modules/
-dist/
-.claude/
-.pytest_cache/
+
+# Campaign Evidence & Scan Reports
+evidence/
+reports/report_campaign_*
+reports/*.html
+reports/*.md
 reports/*.dump
 reports/*.tar.gz
 reports/*_evidence/
-chatgpt_scraper_profile/
+reports/tenant_evidence_*
+reports/template_url_debug.json
+reports/*.png
+reports/recon_dossier_*
+reports/local_all_payloads_*
+reports/experiment_*
+reports/*_audit.json
+reports/*_debug.json
+pdf/
+
+# Logs & Debug Output
+*.log
+scratch/
+
+# Node & Frontend
+node_modules/
+dist/
+.pnpm-store/
+
+# Gradle & Build Artifacts
+.gradle/
+build/
+extensions/burp-montoya-extension/.gradle/
+extensions/burp-montoya-extension/build/
+
+# Local Tools & Scripts
+grep.exe
+run_burp.bat
+
+# IDE & Assistant Caches
+.claude/
+.vscode/
+.agents/
 

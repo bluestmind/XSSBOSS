@@ -8,19 +8,32 @@ on:
 jobs:
   unit:
     runs-on: ubuntu-latest
+    env:
+      SKIP_REAL_BENCHMARK: "1"
+      RATE_LIMIT_REDIS_ENABLED: "False"
+      LLM_ENABLED: "False"
+      BURP_ENABLED: "False"
+      BURP_PROXY_WORKERS: "False"
+      PROXY_ENABLED: "False"
+      UPSTREAM_ROTATING_PROXY_ENABLED: "False"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
       - uses: actions/setup-node@v4
         with: {node-version: "22", cache: npm, cache-dependency-path: ui/package-lock.json}
-      - run: pip install -r backend_api/requirements.txt pytest
+      - run: pip install -r backend_api/requirements.txt pytest pip-audit
+      - run: pip-audit -r backend_api/requirements.txt
       - run: pytest -q
       - run: LLM_ENABLED=False python tools/hard_lab_payload_smoke.py
       - run: python tools/modern_xss_profile_smoke.py
       - run: npm ci
         working-directory: ui
+      - run: npm audit --audit-level=moderate
+        working-directory: ui
       - run: npm run build
+        working-directory: ui
+      - run: npm run lint
         working-directory: ui
 
   browser-accuracy:
@@ -29,6 +42,11 @@ jobs:
     env:
       LLM_ENABLED: "False"
       USE_BROWSER_CHATGPT: "False"
+      USE_UNDETECTED_CHROME: "False"
+      RATE_LIMIT_REDIS_ENABLED: "False"
+      BURP_ENABLED: "False"
+      PROXY_ENABLED: "False"
+      UPSTREAM_ROTATING_PROXY_ENABLED: "False"
       CAPTURE_SCREENSHOTS: hits
       CAPTURE_DOM_SNAPSHOT: hits
     steps:
@@ -73,6 +91,27 @@ jobs:
         run: |
           docker run --rm --entrypoint /bin/promtool -v "$PWD/deploy:/etc/prometheus:ro" prom/prometheus:v3.5.0 check config /etc/prometheus/prometheus.yml
           docker run --rm --entrypoint /bin/promtool -v "$PWD/deploy:/etc/prometheus:ro" prom/prometheus:v3.5.0 check rules /etc/prometheus/xssboss-alerts.yml
+
+  deployment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      POSTGRES_PASSWORD: ci-postgres-password-with-more-than-32-characters
+      SECRET_KEY: ci-secret-key-with-more-than-32-characters
+      API_AUTH_TOKEN: ci-api-token-with-more-than-32-characters
+      ALLOWED_ORIGINS: https://scanner.example.test
+      ORACLE_SERVER_URL: https://scanner.example.test
+      GRAFANA_ADMIN_PASSWORD: ci-grafana-password-with-more-than-32-characters
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate production Compose rendering
+        run: docker compose -f compose.production.yml config --quiet
+      - name: Build production API image
+        run: docker build --target api -t xssboss-api:ci .
+      - name: Build locked-down browser image
+        run: docker build --target browser -t xssboss-browser:ci .
+      - name: Build production UI image
+        run: docker build --target ui -t xssboss-ui:ci .
 
   scale-recovery:
     runs-on: ubuntu-latest

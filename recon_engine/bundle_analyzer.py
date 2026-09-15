@@ -16,6 +16,8 @@ from recon_engine.sourcemap_analyzer import SourceMapAnalyzer
 class BundleAnalyzer:
     """Analyze modern SPA client-side bundles for vulnerabilities and hidden endpoints."""
 
+    MAX_SCRIPT_CHARS = 2_000_000
+
     PATTERNS = {
         "dom_sources": r"\b(?:location\.(?:hash|search|href|pathname)|document\.(?:URL|documentURI|referrer)|window\.name|(?:localStorage|sessionStorage)\.getItem\s*\(|(?:event|e)\.data\b)",
         "dom_sinks": r"\b(dangerouslySetInnerHTML|innerHTML|outerHTML|document\.write(?:ln)?|setHTMLUnsafe|parseHTMLUnsafe)\s*[:=]\s*\{?([^,;\}]+)",
@@ -34,6 +36,25 @@ class BundleAnalyzer:
     }
 
     @staticmethod
+    def safe_artifact_url(script_url: str) -> str:
+        """Return a stable artifact label without credentials or query values."""
+        try:
+            parsed = urllib.parse.urlsplit(str(script_url or ""))
+            if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+                return "<invalid-url>"
+            hostname = parsed.hostname
+            if ":" in hostname and not hostname.startswith("["):
+                hostname = f"[{hostname}]"
+            netloc = hostname
+            if parsed.port is not None:
+                netloc = f"{netloc}:{parsed.port}"
+            return urllib.parse.urlunsplit(
+                (parsed.scheme.lower(), netloc, parsed.path or "/", "", "")
+            )
+        except (TypeError, ValueError):
+            return "<invalid-url>"
+
+    @staticmethod
     def extract_script_urls(html_content: str, base_url: str) -> List[str]:
         """Extract all JavaScript script bundle URLs from an HTML document."""
         script_srcs = re.findall(r'<script[^>]+src=[\"\']([^\"\']+)[\"\']', html_content, re.IGNORECASE)
@@ -47,13 +68,24 @@ class BundleAnalyzer:
         return list(dict.fromkeys(resolved_urls))
 
     @staticmethod
-    def analyze_script_content(script_url: str, content: str, analyze_sourcemaps: bool = True) -> Dict[str, Any]:
+    def analyze_script_content(
+        script_url: str,
+        content: str,
+        analyze_sourcemaps: bool = True,
+        html_content: str = "",
+        response_headers: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """Analyze a single JavaScript script's text content for security findings."""
+        raw_content = str(content or "")
+        original_content_chars = len(raw_content)
+        content = raw_content[:BundleAnalyzer.MAX_SCRIPT_CHARS]
         file_name = script_url.split("/")[-1].split("?")[0]
         results = {
-            "url": script_url,
+            "url": BundleAnalyzer.safe_artifact_url(script_url),
             "file_name": file_name,
-            "size_bytes": len(content),
+            "size_bytes": original_content_chars,
+            "analyzed_chars": len(content),
+            "analysis_truncated": original_content_chars > len(content),
             "dom_sources": [],
             "dom_sinks": [],
             "navigation_sinks": [],
@@ -68,6 +100,16 @@ class BundleAnalyzer:
             "sanitizers": [],
             "websocket_urls": [],
             "sourcemap_findings": [],
+            "smart_taint_targets": [],
+            "reachable_params": [],
+            "vulnerable_libraries": [],
+            "client_trust_findings": [],
+            "client_trust_summary": {},
+            "property_integrity_observations": [],
+            "property_integrity_chains": [],
+            "property_integrity_summary": {},
+            "sanitizer_boundary_findings": [],
+            "sanitizer_boundary_summary": {},
         }
 
         for cat, pattern in BundleAnalyzer.PATTERNS.items():
@@ -97,6 +139,58 @@ class BundleAnalyzer:
                         "offset": m.start()
                     })
 
+        # Trust-boundary analysis complements generic token and taint matching.
+        # These are passive research signals with fingerprints, not confirmed bugs.
+        try:
+            from analysis_engine.client_trust_analyzer import ClientTrustAnalyzer
+
+            trust_findings = ClientTrustAnalyzer.analyze(content)
+            results["client_trust_findings"] = [item.to_dict() for item in trust_findings]
+            trust_summary: Dict[str, int] = {}
+            for item in trust_findings:
+                trust_summary[item.category] = trust_summary.get(item.category, 0) + 1
+            results["client_trust_summary"] = trust_summary
+        except Exception as exc:
+            logger.debug("Client trust analysis unavailable for %s: %s", script_url, exc)
+
+        # Correlate named HTML properties and require a complete ordered property
+        # mutation-to-gadget chain before promoting a property-integrity signal.
+        try:
+            from analysis_engine.property_integrity_analyzer import PropertyIntegrityAnalyzer
+
+            integrity_records = []
+            has_named_property_read = False
+            for item in results["client_trust_findings"]:
+                if not isinstance(item, dict):
+                    continue
+                record = dict(item)
+                details = item.get("details") if isinstance(item.get("details"), dict) else {}
+                record.update(details)
+                if item.get("category") == "dom_named_property_to_sink":
+                    has_named_property_read = True
+                integrity_records.append(record)
+            integrity = PropertyIntegrityAnalyzer.analyze(
+                html_content=html_content if has_named_property_read else "",
+                javascript_content=content,
+                client_trust_findings=integrity_records,
+            )
+            results["property_integrity_observations"] = [
+                item.to_dict() for item in integrity.observations[:200]
+            ]
+            results["property_integrity_chains"] = [
+                item.to_dict() for item in integrity.chains[:100]
+            ]
+            summary: Dict[str, int] = {
+                "html_named_properties": len(integrity.named_properties),
+                "observations": len(integrity.observations),
+                "chains": len(integrity.chains),
+            }
+            for item in integrity.chains:
+                summary[item.kind] = summary.get(item.kind, 0) + 1
+            results["property_integrity_summary"] = summary
+        except Exception as exc:
+            logger.debug("Property integrity analysis unavailable for %s: %s", script_url, exc)
+
         # Source-to-Sink Taint Flow Linking & AST Taint Graph Analysis
         results["source_sink_flows"] = BundleAnalyzer.detect_source_to_sink_flows(content)
         for flow in results["source_sink_flows"]:
@@ -114,6 +208,63 @@ class BundleAnalyzer:
         except Exception:
             pass
 
+        # Smart hunter: data-flow taint analysis. Reports only params that PROVABLY reach an
+        # unsanitized sink, with the sink/context — so the fuzzer tests what can actually pop
+        # instead of spraying every parameter.
+        try:
+            from analysis_engine.smart_taint_analyzer import SmartTaintAnalyzer, Reachability
+            smart = SmartTaintAnalyzer.analyze(content)
+            results["smart_taint_targets"] = [f.to_dict() for f in smart]
+            reachable = [f.source_param for f in smart if f.reachability is Reachability.REACHABLE]
+            results["reachable_params"] = list(dict.fromkeys(reachable))
+            # Promote reachable params to the FRONT of the fuzz worklist (highest EV first).
+            for param in reversed(results["reachable_params"]):
+                if param in results["discovered_parameters"]:
+                    results["discovered_parameters"].remove(param)
+                results["discovered_parameters"].insert(0, param)
+        except Exception:
+            pass
+
+        # Ordered, operand-level sanitizer analysis corrects the legacy token
+        # heuristic when only part of an expression is sanitized or the output
+        # is consumed in a different context. Effective boundaries remain control
+        # evidence; only incomplete/unknown paths are returned to the worklist.
+        try:
+            from analysis_engine.sanitizer_boundary_analyzer import (
+                SanitizerBoundaryAnalyzer,
+            )
+
+            boundary_findings = SanitizerBoundaryAnalyzer.analyze(content)
+            results["sanitizer_boundary_findings"] = [
+                item.to_dict() for item in boundary_findings
+            ]
+            boundary_summary: Dict[str, int] = {}
+            for item in boundary_findings:
+                boundary_summary[item.category] = boundary_summary.get(item.category, 0) + 1
+                if item.category != "effective_sanitizer_boundary":
+                    param = item.source_param
+                    if param and param not in results["reachable_params"]:
+                        results["reachable_params"].append(param)
+                    if param and param not in results["discovered_parameters"]:
+                        results["discovered_parameters"].append(param)
+            results["sanitizer_boundary_summary"] = boundary_summary
+            for param in reversed(results["reachable_params"]):
+                if param in results["discovered_parameters"]:
+                    results["discovered_parameters"].remove(param)
+                results["discovered_parameters"].insert(0, param)
+        except Exception as exc:
+            logger.debug("Sanitizer boundary analysis unavailable for %s: %s", script_url, exc)
+
+        # Vulnerable JS library scan (retire.js-style): old jQuery/AngularJS/etc. versions are a
+        # reliable XSS source, and a match boosts the exact payload family (e.g. Angular → CSTI).
+        try:
+            from analysis_engine.vulnerable_library_scanner import VulnerableLibraryScanner
+            lib_findings = VulnerableLibraryScanner.scan_artifact(script_url, content)
+            results["vulnerable_libraries"] = [f.to_dict() for f in lib_findings]
+            results["payload_boosts"] = VulnerableLibraryScanner.payload_boosts(lib_findings)
+        except Exception:
+            pass
+
         # Deduplicate internal API endpoints
         unique_apis = list(dict.fromkeys([item["match"].strip("'\"`") for item in results["internal_api_endpoints"]]))
         results["internal_api_endpoints"] = unique_apis
@@ -121,7 +272,11 @@ class BundleAnalyzer:
         # Optional Source Map Analysis
         if analyze_sourcemaps:
             sm_analyzer = SourceMapAnalyzer()
-            sm_findings = sm_analyzer.analyze_script_for_sourcemap(script_url, content)
+            sm_findings = sm_analyzer.analyze_script_for_sourcemap(
+                script_url,
+                content,
+                response_headers=response_headers,
+            )
             if sm_findings:
                 results["sourcemap_findings"] = sm_findings
                 for smf in sm_findings:
@@ -129,7 +284,9 @@ class BundleAnalyzer:
                     results["discovered_parameters"].extend(smf.discovered_parameters)
 
         results["internal_api_endpoints"] = sorted(list(set(results["internal_api_endpoints"])))
-        results["discovered_parameters"] = sorted(list(set(results["discovered_parameters"])))
+        # Keep taint/sanitizer-boundary candidates at the front while removing
+        # duplicates. Sorting here previously erased the analyzer's priority.
+        results["discovered_parameters"] = list(dict.fromkeys(results["discovered_parameters"]))
         return results
 
     @staticmethod

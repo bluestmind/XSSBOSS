@@ -9,6 +9,7 @@ from backend_api.models.endpoint import Endpoint
 from backend_api.models.finding import Finding, FindingStatus, Severity
 from backend_api.models.param import Param
 from backend_api.utils.logger import logger
+from backend_api.utils.rate_limiter import rate_limited_call
 
 
 class CorsAuditor:
@@ -59,18 +60,22 @@ class CorsAuditor:
         if probe_method == "OPTIONS":
             headers["Access-Control-Request-Method"] = method if method else "GET"
 
+        from backend_api.utils.stealth import get_http_proxy_kwargs
+
         request_kwargs: Dict[str, Any] = {
             "timeout": CorsAuditor.TIMEOUT,
             "headers": headers,
             "follow_redirects": False,
-            "verify": False,
+            "verify": not settings.ALLOW_INSECURE_TLS,
             "trust_env": False,
         }
-        if settings.PROXY_URL:
-            request_kwargs["proxies"] = settings.PROXY_URL
+        request_kwargs.update(get_http_proxy_kwargs(rotated=True))
 
         with httpx.Client(**request_kwargs) as client:
-            response = client.request(probe_method, endpoint.url_pattern)
+            response = rate_limited_call(
+                endpoint.url_pattern,
+                lambda: client.request(probe_method, endpoint.url_pattern),
+            )
 
         response_headers = {key.lower(): value for key, value in response.headers.items()}
         allow_origin = response_headers.get("access-control-allow-origin", "").strip()
@@ -93,8 +98,22 @@ class CorsAuditor:
                     data_headers.update(endpoint.auth_context)
 
                 try:
-                    with httpx.Client(timeout=CorsAuditor.TIMEOUT, verify=False, follow_redirects=False, trust_env=False) as client:
-                        data_res = client.request(data_method, endpoint.url_pattern, headers=data_headers)
+                    data_kwargs = {
+                        "timeout": CorsAuditor.TIMEOUT,
+                        "verify": not settings.ALLOW_INSECURE_TLS,
+                        "follow_redirects": False,
+                        "trust_env": False,
+                    }
+                    data_kwargs.update(get_http_proxy_kwargs(rotated=True))
+                    with httpx.Client(**data_kwargs) as client:
+                        data_res = rate_limited_call(
+                            endpoint.url_pattern,
+                            lambda: client.request(
+                                data_method,
+                                endpoint.url_pattern,
+                                headers=data_headers,
+                            ),
+                        )
                         data_headers_map = {k.lower(): v for k, v in data_res.headers.items()}
                         data_acao = data_headers_map.get("access-control-allow-origin", "").strip()
                         data_acac = data_headers_map.get("access-control-allow-credentials", "").strip().lower()

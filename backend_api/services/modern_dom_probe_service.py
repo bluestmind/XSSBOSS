@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional
 import httpx
 from sqlalchemy.orm import Session
 
+from backend_api.config import settings
 from backend_api.models.endpoint import Endpoint
 from backend_api.utils.js_parser import JSParser
 from backend_api.utils.modern_xss_profiles import ModernXSSProfiles
@@ -37,11 +38,20 @@ class ModernDOMProbeService:
 
         if include_live_fingerprint and endpoint.method.upper() == "GET":
             try:
-                response = httpx.get(
+                from backend_api.utils.stealth import get_http_proxy_kwargs
+                proxy_kwargs = get_http_proxy_kwargs(rotated=True)
+                from backend_api.utils.rate_limiter import rate_limited_call
+
+                response = rate_limited_call(
                     target_url,
-                    headers=endpoint.auth_context or {},
-                    follow_redirects=True,
-                    timeout=10,
+                    lambda: httpx.get(
+                        target_url,
+                        headers=endpoint.auth_context or {},
+                        follow_redirects=False,
+                        timeout=10,
+                        verify=not settings.ALLOW_INSECURE_TLS,
+                        **proxy_kwargs,
+                    ),
                 )
                 html_content = response.text
                 headers = dict(response.headers)

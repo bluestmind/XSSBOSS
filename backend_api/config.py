@@ -1,5 +1,6 @@
 """Configuration management for XSS Boss backend."""
 import os
+import sys
 from pathlib import Path
 from typing import Optional
 import json
@@ -16,11 +17,16 @@ class Settings(BaseSettings):
     )
 
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
+    TEST_DATABASE_URL: str = os.getenv("TEST_DATABASE_URL", "sqlite:///./xssboss_test.db")
     
-    # Database
+    # Database (auto-routes to test database if testing environment or pytest is detected)
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL",
-        "sqlite:///./xssboss.db"
+        "sqlite:///./xssboss_test.db" if (
+            os.getenv("ENVIRONMENT") == "test" or
+            "pytest" in sys.modules or
+            bool(os.getenv("PYTEST_CURRENT_TEST"))
+        ) else "sqlite:///./xssboss.db"
     )
     
     # Redis
@@ -56,42 +62,86 @@ class Settings(BaseSettings):
     # Capture modes: off/false/0, hits, all/true/1/yes
     CAPTURE_SCREENSHOTS: str = os.getenv("CAPTURE_SCREENSHOTS", "hits")
     CAPTURE_DOM_SNAPSHOT: str = os.getenv("CAPTURE_DOM_SNAPSHOT", "hits")
-    DOM_SNAPSHOT_MAX_CHARS: int = int(os.getenv("DOM_SNAPSHOT_MAX_CHARS", "4000"))
+    # V8 precise coverage is passive but has a bounded CPU/memory cost. ``all``
+    # retains activation evidence for both positive and negative browser runs;
+    # use ``hits`` to retain it only when the execution oracle fires, or ``off``
+    # to disable collection entirely.
+    CAPTURE_RUNTIME_COVERAGE: str = os.getenv("CAPTURE_RUNTIME_COVERAGE", "all")
+    # Runtime lineage keeps only bounded event relationships and fingerprints;
+    # observed values and source text are never retained.
+    CAPTURE_RUNTIME_LINEAGE: str = os.getenv("CAPTURE_RUNTIME_LINEAGE", "all")
+    # Optional follow-up prioritization runs three isolated GET navigations with
+    # inert alphanumeric markers in fixed A/A/B order. The result is order-
+    # confounded and never confirms XSS; only the execution oracle does. It is
+    # disabled by default because it increases target traffic; a test case may
+    # also opt in explicitly through trusted research metadata.
+    RUNTIME_LINEAGE_AAB_PROBES: bool = os.getenv(
+        "RUNTIME_LINEAGE_AAB_PROBES", "False"
+    ).lower() in ("true", "1", "t", "yes")
+    # The HMAC authenticates the worker's redacted projection, not hostile-page
+    # truth. Rotate this identifier whenever SECRET_KEY is rotated so stored
+    # projections fail with an explicit key-version mismatch.
+    RUNTIME_LINEAGE_HMAC_KEY_VERSION: str = os.getenv(
+        "RUNTIME_LINEAGE_HMAC_KEY_VERSION", "1"
+    )
+    # Browser-native flattened DOM snapshots are reduced immediately to marker
+    # placement metadata; raw snapshots are never persisted.
+    CAPTURE_DOM_DIFFERENTIAL: str = os.getenv("CAPTURE_DOM_DIFFERENTIAL", "all")
+    DOM_SNAPSHOT_MAX_CHARS: int = int(os.getenv("DOM_SNAPSHOT_MAX_CHARS", "8000"))
     EVIDENCE_DIR: str = os.getenv("EVIDENCE_DIR", "./evidence")
     
-    # Proxy Settings
+    # Proxy & Test Host Settings
     PROXY_URL: Optional[str] = os.getenv("PROXY_URL", None)
+    OPEN_REDIRECT_TEST_HOST: str = os.getenv("OPEN_REDIRECT_TEST_HOST", "example.com")
  
     # Resource guards
-    MAX_PAYLOADS_PER_CONTEXT: int = int(os.getenv("MAX_PAYLOADS_PER_CONTEXT", "12"))
-    MAX_TEST_CASES_PER_EXPERIMENT: int = int(os.getenv("MAX_TEST_CASES_PER_EXPERIMENT", "500"))
-    MAX_QUEUE_ACTIVE: int = int(os.getenv("MAX_QUEUE_ACTIVE", "2"))
-    MAX_PROFILING_WORKERS: int = int(os.getenv("MAX_PROFILING_WORKERS", "2"))
+    MAX_PAYLOADS_PER_CONTEXT: int = int(os.getenv("MAX_PAYLOADS_PER_CONTEXT", "32"))
+    MAX_TEST_CASES_PER_EXPERIMENT: int = int(os.getenv("MAX_TEST_CASES_PER_EXPERIMENT", "1500"))
+    MAX_QUEUE_ACTIVE: int = int(os.getenv("MAX_QUEUE_ACTIVE", "1"))
+    MAX_PROFILING_WORKERS: int = int(os.getenv("MAX_PROFILING_WORKERS", "1"))
     
     # Rate limiting / throttling
-    REQUEST_DELAY_MS: int = int(os.getenv("REQUEST_DELAY_MS", "1000"))  # ms between requests to same target
-    MAX_REQUESTS_PER_MINUTE: int = int(os.getenv("MAX_REQUESTS_PER_MINUTE", "30"))  # hard cap per target per minute
+    REQUEST_DELAY_MS: int = int(os.getenv("REQUEST_DELAY_MS", "1200"))  # ms between requests to same target
+    MAX_REQUESTS_PER_MINUTE: int = int(os.getenv("MAX_REQUESTS_PER_MINUTE", "40"))  # hard cap per target per minute
+    RATE_LIMIT_REDIS_ENABLED: bool = os.getenv(
+        "RATE_LIMIT_REDIS_ENABLED", "True"
+    ).lower() in ("true", "1", "t", "yes")
+    # Distributed production workers must stop when their shared coordinator is
+    # unavailable; otherwise each process can independently spend the full cap.
+    RATE_LIMIT_REDIS_REQUIRED: bool = os.getenv(
+        "RATE_LIMIT_REDIS_REQUIRED", "False"
+    ).lower() in ("true", "1", "t", "yes")
+    RATE_LIMIT_REDIS_RETRY_SECS: float = float(
+        os.getenv("RATE_LIMIT_REDIS_RETRY_SECS", "30")
+    )
+    RATE_LIMIT_FALLBACK_WORKER_ESTIMATE: int = int(
+        os.getenv("RATE_LIMIT_FALLBACK_WORKER_ESTIMATE", "4")
+    )
     ADAPTIVE_THROTTLE: bool = os.getenv("ADAPTIVE_THROTTLE", "True").lower() in ("true", "1", "t", "yes")
-    THROTTLE_BACKOFF_MULTIPLIER: float = float(os.getenv("THROTTLE_BACKOFF_MULTIPLIER", "2.0"))
-    THROTTLE_MAX_DELAY_MS: int = int(os.getenv("THROTTLE_MAX_DELAY_MS", "10000"))  # max 10s between requests
-    JITTER_FACTOR: float = float(os.getenv("JITTER_FACTOR", "0.5"))  # ±50% random noise on delays
+    THROTTLE_BACKOFF_MULTIPLIER: float = float(os.getenv("THROTTLE_BACKOFF_MULTIPLIER", "2.5"))
+    THROTTLE_MAX_DELAY_MS: int = int(os.getenv("THROTTLE_MAX_DELAY_MS", "60000"))
+    JITTER_FACTOR: float = float(os.getenv("JITTER_FACTOR", "0.15"))
     
     # Circuit breaker — auto-pause scanning when target is unreachable
     CIRCUIT_BREAKER_ENABLED: bool = os.getenv("CIRCUIT_BREAKER_ENABLED", "True").lower() in ("true", "1", "t", "yes")
-    CIRCUIT_BREAKER_THRESHOLD: int = int(os.getenv("CIRCUIT_BREAKER_THRESHOLD", "5"))  # consecutive failures to trip
-    CIRCUIT_BREAKER_RECOVERY_SECS: int = int(os.getenv("CIRCUIT_BREAKER_RECOVERY_SECS", "60"))  # wait before half-open probe
+    CIRCUIT_BREAKER_THRESHOLD: int = int(os.getenv("CIRCUIT_BREAKER_THRESHOLD", "3"))
+    CIRCUIT_BREAKER_RECOVERY_SECS: int = int(os.getenv("CIRCUIT_BREAKER_RECOVERY_SECS", "120"))
     
     # UA rotation — cycle through realistic User-Agent strings
-    ROTATE_USER_AGENT: bool = os.getenv("ROTATE_USER_AGENT", "True").lower() in ("true", "1", "t", "yes")
+    ROTATE_USER_AGENT: bool = os.getenv("ROTATE_USER_AGENT", "False").lower() in ("true", "1", "t", "yes")
     
     # WAF bypass headers — inject X-Forwarded-For, X-Originating-IP, etc.
     # Spoofed forwarding headers can violate program rules and change application
     # behavior, so require an explicit opt-in for authorized programs.
     WAF_BYPASS_HEADERS: bool = os.getenv("WAF_BYPASS_HEADERS", "False").lower() in ("true", "1", "t", "yes")
     
-    # Proxy rotation — cycle through proxy list
+    # Proxy rotation — cycle through proxy list or file
+    PROXY_ENABLED: bool = os.getenv("PROXY_ENABLED", "False").lower() in ("true", "1", "t", "yes")
     PROXY_LIST: str = os.getenv("PROXY_LIST", "")  # comma-separated: socks5://p1:1080,http://p2:8080
+    PROXY_LIST_FILE: Optional[str] = os.getenv("PROXY_LIST_FILE", "proxies.txt")  # file with one proxy per line
     PROXY_ROTATION: str = os.getenv("PROXY_ROTATION", "round_robin")  # round_robin or random
+    PROXY_MAX_FAILURES: int = int(os.getenv("PROXY_MAX_FAILURES", "3"))  # auto-eject proxy after N failures
+    ALLOW_INSECURE_TLS: bool = os.getenv("ALLOW_INSECURE_TLS", "False").lower() in ("true", "1", "t", "yes")
     
     # Security
     SECRET_KEY: str = os.getenv("SECRET_KEY", "change-me-in-production")
@@ -107,13 +157,45 @@ class Settings(BaseSettings):
     
     # Burp Suite Settings
     BURP_API_URL: str = os.getenv("BURP_API_URL", "http://127.0.0.1:13337")
-    BURP_API_KEY: Optional[str] = os.getenv("BURP_API_KEY", None)
-    BURP_ENABLED: bool = os.getenv("BURP_ENABLED", "True").lower() in ("true", "1", "t", "yes")
+    BURP_API_KEY: Optional[str] = os.getenv("BURP_API_KEY") or None
+    BURP_ENABLED: bool = os.getenv("BURP_ENABLED", "False").lower() in ("true", "1", "t", "yes")
+    BURP_AUTO_START: bool = os.getenv("BURP_AUTO_START", "False").lower() in ("true", "1", "t", "yes")
+    BURP_PROGRAM_AUTO_SCAN: bool = os.getenv("BURP_PROGRAM_AUTO_SCAN", "False").lower() in ("true", "1", "t", "yes")
+    BURP_EXECUTABLE: Optional[str] = os.getenv("BURP_EXECUTABLE", None)
+    BURP_JAVA_EXECUTABLE: Optional[str] = os.getenv("BURP_JAVA_EXECUTABLE", None)
+    BURP_STARTUP_TIMEOUT_SECONDS: int = int(os.getenv("BURP_STARTUP_TIMEOUT_SECONDS", "45"))
+    # Bound optional Burp startup during one-shot scans. Explicit Burp startup
+    # operations retain the longer timeout above.
+    BURP_SCAN_STARTUP_TIMEOUT_SECONDS: float = float(os.getenv("BURP_SCAN_STARTUP_TIMEOUT_SECONDS", "3"))
+    BURP_STARTUP_ARGS: str = os.getenv("BURP_STARTUP_ARGS", "")
+    BURP_PROJECT_FILE: Optional[str] = os.getenv("BURP_PROJECT_FILE", None)
+    BURP_PROXY_URL: str = os.getenv("BURP_PROXY_URL", "http://127.0.0.1:8080")
+    BURP_PROXY_WORKERS: bool = os.getenv("BURP_PROXY_WORKERS", "False").lower() in ("true", "1", "t", "yes")
+    UPSTREAM_ROTATING_PROXY_ENABLED: bool = os.getenv("UPSTREAM_ROTATING_PROXY_ENABLED", "False").lower() in ("true", "1", "t", "yes")
+    UPSTREAM_ROTATING_PROXY_HOST: str = os.getenv("UPSTREAM_ROTATING_PROXY_HOST", "127.0.0.1")
+    UPSTREAM_ROTATING_PROXY_PORT: int = int(os.getenv("UPSTREAM_ROTATING_PROXY_PORT", "8899"))
     
     # LLM Settings
     LLM_API_URL: str = os.getenv("LLM_API_URL", "http://localhost:11434/api/generate")
     LLM_MODEL: str = os.getenv("LLM_MODEL", "mistral")
-    LLM_ENABLED: bool = os.getenv("LLM_ENABLED", "True").lower() in ("true", "1", "t")
+    LLM_ENABLED: bool = os.getenv("LLM_ENABLED", "False").lower() in ("true", "1", "t")
+    LLM_PREFER_LOCAL: bool = os.getenv("LLM_PREFER_LOCAL", "True").lower() in ("true", "1", "t")
+    LLM_TIMEOUT_SECONDS: int = int(os.getenv("LLM_TIMEOUT_SECONDS", "180"))
+    LLM_KEEP_ALIVE: str = os.getenv("LLM_KEEP_ALIVE", "30m")
+    LLM_NUM_CTX: int = int(os.getenv("LLM_NUM_CTX", "8192"))
+    LLM_MAX_OUTPUT_TOKENS: int = int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "768"))
+    LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.1"))
+    LLM_CAMPAIGN_ADVISOR: bool = os.getenv("LLM_CAMPAIGN_ADVISOR", "True").lower() in ("true", "1", "t")
+    LLM_MIDSCAN_ADVISOR: bool = os.getenv("LLM_MIDSCAN_ADVISOR", "True").lower() in ("true", "1", "t")
+    LLM_MIDSCAN_MAX_CALLS: int = int(os.getenv("LLM_MIDSCAN_MAX_CALLS", "8"))
+    LLM_MIDSCAN_MIN_CONFIDENCE: float = float(os.getenv("LLM_MIDSCAN_MIN_CONFIDENCE", "0.65"))
+    LLM_WORKFLOW_ADVISOR: bool = os.getenv("LLM_WORKFLOW_ADVISOR", "True").lower() in ("true", "1", "t")
+    LLM_WORKFLOW_MAX_CALLS: int = int(os.getenv("LLM_WORKFLOW_MAX_CALLS", "6"))
+    # Security telemetry can contain private URLs, source snippets, and session
+    # artifacts. Keep it on the local model unless the operator explicitly opts in.
+    LLM_ALLOW_REMOTE_SECURITY_DATA: bool = os.getenv(
+        "LLM_ALLOW_REMOTE_SECURITY_DATA", "False"
+    ).lower() in ("true", "1", "t")
     
     # OpenAI Settings
     OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY", None)
@@ -134,8 +216,26 @@ class Settings(BaseSettings):
             errors.append("ORCHESTRATION_MODE must be celery")
         if self.AUDIT_MODE.lower() != "celery":
             errors.append("AUDIT_MODE must be celery")
+        if not self.REDIS_URL:
+            errors.append("REDIS_URL must be configured")
+        if not self.RATE_LIMIT_REDIS_ENABLED or not self.RATE_LIMIT_REDIS_REQUIRED:
+            errors.append(
+                "distributed rate limiting must be enabled and required"
+            )
         if self.SECRET_KEY == "change-me-in-production" or len(self.SECRET_KEY) < 32:
             errors.append("SECRET_KEY must be a unique value of at least 32 characters")
+        lineage_key_version = self.RUNTIME_LINEAGE_HMAC_KEY_VERSION
+        if (
+            not lineage_key_version
+            or len(lineage_key_version) > 32
+            or any(
+                character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
+                for character in lineage_key_version
+            )
+        ):
+            errors.append(
+                "RUNTIME_LINEAGE_HMAC_KEY_VERSION must be a 1-32 character key identifier"
+            )
         if not self.API_AUTH_TOKEN or len(self.API_AUTH_TOKEN) < 32:
             errors.append("API_AUTH_TOKEN must be set to at least 32 characters")
         if self.TENANT_API_TOKENS.strip():

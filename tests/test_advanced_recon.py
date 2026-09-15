@@ -44,8 +44,7 @@ class TestAdvancedRecon(unittest.TestCase):
         self.assertEqual(urls[0], "http://example.com/page1")
         self.assertEqual(urls[1], "http://example.com/page2?debug=true")
 
-    @patch("urllib.request.urlopen")
-    def test_discover_and_parse_js(self, mock_urlopen):
+    def test_discover_and_parse_js(self):
         js_content = b"""
         const api1 = "/api/v1/user";
         let api2 = '/api/v2/config?admin=1';
@@ -53,8 +52,6 @@ class TestAdvancedRecon(unittest.TestCase):
         let id = searchParams.get("testparam");
         let arg = queryParams['myparam'];
         """
-        mock_urlopen.return_value = MockResponse(js_content)
-        
         db = MagicMock()
         target = Target(id=1, base_url="http://example.com")
         db.query().filter().first.return_value = target
@@ -67,6 +64,7 @@ class TestAdvancedRecon(unittest.TestCase):
         db.query().filter().first.return_value = None
         
         recon = AdvancedRecon(db, 1)
+        recon._fetch_active_text = MagicMock(return_value=js_content.decode("utf-8"))
         js_links = recon.discover_and_parse_js("http://example.com")
         
         self.assertEqual(len(js_links), 2)

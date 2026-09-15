@@ -235,6 +235,80 @@ def hard_dom_sink():
     )
 
 
+@app.get("/hard/html-comment")
+def hard_html_comment(q: str = Query("")):
+    """HTML comment breakout context."""
+    return _page("Hard Case: HTML Comment", f"<!-- {q} -->")
+
+
+@app.get("/hard/textarea")
+def hard_textarea(q: str = Query("")):
+    """RCDATA textarea breakout context."""
+    return _page("Hard Case: Textarea RCDATA", f"<textarea>{q}</textarea>")
+
+
+@app.get("/hard/js-template")
+def hard_js_template(term: str = Query("")):
+    """JavaScript template-literal expression context."""
+    return _page(
+        "Hard Case: JavaScript Template Literal",
+        f"<div id='template-result'></div><script>const value = `{term}`; document.getElementById('template-result').textContent = value;</script>",
+    )
+
+
+@app.get("/hard/url-link")
+def hard_url_link(next: str = Query("")):
+    """User-controlled URL attribute requiring interaction."""
+    return _page("Hard Case: URL Attribute", f"<a id='target-link' href=\"{next}\">continue</a>")
+
+
+@app.get("/hard/fragment-sink")
+def hard_fragment_sink():
+    """Location fragment flowing to a delayed innerHTML sink."""
+    return _page(
+        "Hard Case: Fragment DOM Sink",
+        """
+<div id="fragment-sink"></div>
+<script>
+  setTimeout(function() {
+    var value = decodeURIComponent(location.hash.slice(1));
+    document.getElementById('fragment-sink').innerHTML = value;
+  }, 50);
+</script>
+""",
+    )
+
+
+@app.get("/hard/header-reflection")
+def hard_header_reflection(request: Request):
+    """Request-header source reflected into raw HTML."""
+    value = request.headers.get("x-xss-probe", "")
+    return _page("Hard Case: Header Reflection", f"<div>{value}</div>")
+
+
+@app.get("/hard/cookie-reflection")
+def hard_cookie_reflection(request: Request):
+    """Cookie source reflected into raw HTML."""
+    value = request.cookies.get("xss_probe", "")
+    return _page("Hard Case: Cookie Reflection", f"<div>{value}</div>")
+
+
+@app.get("/hard/shadow-dom")
+def hard_shadow_dom(q: str = Query("")):
+    """User input flowing into an open Shadow DOM innerHTML sink."""
+    encoded = json.dumps(q).replace("</", "<\\/")
+    return _page(
+        "Hard Case: Shadow DOM Sink",
+        f"""
+<div id="shadow-host"></div>
+<script>
+  var root = document.getElementById('shadow-host').attachShadow({{mode: 'open'}});
+  root.innerHTML = {encoded};
+</script>
+""",
+    )
+
+
 @app.get("/hard/post-message")
 def hard_post_message():
     """postMessage source flowing to innerHTML."""

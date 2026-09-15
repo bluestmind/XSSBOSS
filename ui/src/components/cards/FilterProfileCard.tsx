@@ -38,7 +38,7 @@ const FilterProfileCard = ({ profile }: FilterProfileCardProps) => {
           <div>
             <h4 className="text-sm font-semibold text-carbon-200 mb-2">Blocked Tokens:</h4>
             <div className="flex flex-wrap gap-2">
-              {profile.blocked_tokens.map((token, idx) => (
+              {profile.blocked_tokens.map((token: string, idx: number) => (
                 <span
                   key={idx}
                   className="px-2 py-1 text-xs font-semibold rounded bg-red-500/15 text-red-200"
@@ -54,7 +54,7 @@ const FilterProfileCard = ({ profile }: FilterProfileCardProps) => {
           <div>
             <h4 className="text-sm font-semibold text-carbon-200 mb-2">Allowed Tokens:</h4>
             <div className="flex flex-wrap gap-2">
-              {profile.allowed_tokens.map((token, idx) => (
+              {profile.allowed_tokens.map((token: string, idx: number) => (
                 <span
                   key={idx}
                   className="px-2 py-1 text-xs font-semibold rounded bg-green-500/15 text-green-200"
@@ -70,7 +70,7 @@ const FilterProfileCard = ({ profile }: FilterProfileCardProps) => {
           <div>
             <h4 className="text-sm font-semibold text-carbon-200 mb-2">Normalization:</h4>
             <div className="flex flex-wrap gap-2">
-              {profile.normalization_behavior.map((behavior, idx) => (
+              {profile.normalization_behavior.map((behavior: string, idx: number) => (
                 <span
                   key={idx}
                   className="px-2 py-1 text-xs font-semibold rounded bg-yellow-500/15 text-yellow-200"

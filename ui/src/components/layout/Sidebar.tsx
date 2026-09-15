@@ -1,7 +1,5 @@
-/**
- * Command rail — built on the 21st.dev "Sidebar" component (uniquesonu/sidebar),
- * adapted to XSS Boss routes, react-router navigation, and the console palette.
- */
+import { useState, useEffect } from 'react';
+import axios from 'axios';
 import { Link, useLocation } from 'react-router-dom';
 import {
   Radar,
@@ -12,11 +10,16 @@ import {
   ListChecks,
   ChevronLeft,
   Zap,
+  Trophy,
+  Shield,
+  Terminal,
 } from 'lucide-react';
 import { useUIStore } from '@/store/uiState';
 
 const menuItems = [
+  { name: 'Programs', hint: 'Bounty targets → 1-click hunt', path: '/programs', icon: Trophy },
   { name: 'Recon & Vuln Scan', hint: 'URL → monitor', path: '/scan', icon: Radar },
+  { name: 'Pipeline Logs', hint: 'Live telemetry & traces', path: '/logs', icon: Terminal },
   { name: 'Live Fuzz Monitor', hint: 'Real-time', path: '/live', icon: Activity },
   { name: 'Targets & Scope', hint: 'Authorization', path: '/targets', icon: Crosshair },
   { name: 'Fuzz Campaigns', hint: 'Batch runs', path: '/experiments', icon: FlaskConical },
@@ -27,10 +30,37 @@ const menuItems = [
 const Sidebar = () => {
   const location = useLocation();
   const { sidebarOpen, setSidebarOpen, sidebarCollapsed, toggleSidebarCollapsed } = useUIStore();
+  const [proxyCount, setProxyCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const fetchProxyStatus = async () => {
+      try {
+        const res = await axios.get('/api/v1/proxy/status');
+        if (active && res.data && typeof res.data.active_count === 'number') {
+          setProxyCount(res.data.active_count);
+        }
+      } catch {
+        // Fallback silently if offline
+      }
+    };
+    fetchProxyStatus();
+    const interval = setInterval(fetchProxyStatus, 15000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   const isActive = (path: string) => {
     if (path === '/scan') return location.pathname === '/' || location.pathname.startsWith('/scan');
     return location.pathname.startsWith(path);
+  };
+
+  const formatCount = (num: number) => {
+    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+    if (num >= 1000) return (num / 1000).toFixed(1) + 'k';
+    return num.toString();
   };
 
   return (
@@ -106,31 +136,45 @@ const Sidebar = () => {
           })}
         </nav>
 
-        {/* Footer — engine status */}
-        <div className="border-t border-carbon-700/60 p-3">
+        {/* Footer — Engine & Proxy Status */}
+        <div className="border-t border-carbon-700/60 p-3 space-y-2">
           {sidebarCollapsed ? (
-            <div className="flex justify-center py-1" title="Engine online">
+            <div className="flex flex-col items-center gap-2 py-1" title="Engine & Proxies Online">
               <span className="relative flex h-2.5 w-2.5">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400/70" />
                 <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400" />
               </span>
             </div>
           ) : (
-            <div className="flex items-center justify-between rounded-xl border border-carbon-700/70 bg-carbon-800/50 px-3.5 py-3">
-              <div className="flex items-center gap-2.5">
-                <span className="relative flex h-2.5 w-2.5">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400/70" />
-                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400" />
-                </span>
-                <div className="leading-tight">
-                  <div className="text-xs font-semibold text-carbon-100">Engine online</div>
-                  <div className="font-mono text-[10px] text-carbon-500">v1.2 · ready</div>
+            <>
+              {/* Proxy Pool Pill */}
+              <div className="flex items-center justify-between rounded-lg border border-carbon-800 bg-carbon-900/60 px-3 py-2 text-xs">
+                <div className="flex items-center gap-2 text-carbon-300">
+                  <Shield className="h-3.5 w-3.5 text-brand-400" />
+                  <span className="text-[11px] font-medium">Proxy Fleet</span>
                 </div>
+                <span className="font-mono text-[11px] font-bold text-emerald-400">
+                  {proxyCount !== null ? `${formatCount(proxyCount)} live` : 'Rotating'}
+                </span>
               </div>
-              <span className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase text-emerald-300">
-                live
-              </span>
-            </div>
+
+              {/* Engine Status */}
+              <div className="flex items-center justify-between rounded-xl border border-carbon-700/70 bg-carbon-800/50 px-3.5 py-2.5">
+                <div className="flex items-center gap-2.5">
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400/70" />
+                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400" />
+                  </span>
+                  <div className="leading-tight">
+                    <div className="text-xs font-semibold text-carbon-100">Dual Engine</div>
+                    <div className="font-mono text-[10px] text-carbon-500">Playwright + Burp</div>
+                  </div>
+                </div>
+                <span className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase text-emerald-300">
+                  MAX
+                </span>
+              </div>
+            </>
           )}
         </div>
       </aside>
@@ -139,3 +183,4 @@ const Sidebar = () => {
 };
 
 export default Sidebar;
+

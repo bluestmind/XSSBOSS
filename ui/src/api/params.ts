@@ -16,5 +16,25 @@ export const paramsApi = {
     const response = await api.get<Param>(`/params/${id}`);
     return response.data;
   },
+
+  /** Get self-improving parameter vocabulary */
+  getDictionary: async (category?: string, query?: string) => {
+    const params = new URLSearchParams();
+    if (category) params.append('category', category);
+    if (query) params.append('query', query);
+    const response = await api.get(`/params/dictionary?${params.toString()}`);
+    return response.data;
+  },
+
+  /** Add/train custom parameter into the dictionary */
+  addCustomParam: async (paramName: string, category: string = 'redirect', source: string = 'Operator UI') => {
+    const response = await api.post('/params/dictionary', {
+      param_name: paramName,
+      category,
+      source,
+    });
+    return response.data;
+  },
 };
+
 

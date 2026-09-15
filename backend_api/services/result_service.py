@@ -5,7 +5,7 @@ from collections import defaultdict
 from datetime import datetime
 import json
 import base64
-import ast
+import urllib.parse
 
 from backend_api.models.test_case import TestCase, TestCaseStatus
 from backend_api.models.execution import Execution, OracleStatus
@@ -16,6 +16,10 @@ from backend_api.models.context import Context
 from backend_api.models.sink import Sink
 from backend_api.utils.logger import logger
 from backend_api.utils.impact_scorer import ImpactScorer
+from backend_api.utils.log_serializer import (
+    parse_execution_logs,
+    sanitize_execution_logs,
+)
 from backend_api.services.run_state_service import RunStateService
 
 
@@ -177,10 +181,13 @@ class ResultService:
             )
             
             # Calculate tech stack and sink details
-            from backend_api.utils.log_serializer import parse_execution_logs
             tech_stack = {}
             if successful_exec.logs:
-                logs_dict = parse_execution_logs(successful_exec.logs)
+                logs_dict = ResultService._parse_execution_logs(
+                    successful_exec.logs,
+                    test_case_id=successful_exec.test_case_id,
+                    attempt_no=successful_exec.attempt_no,
+                )
                 if isinstance(logs_dict, dict):
                     tech_stack = logs_dict.get('tech_stack', {})
 
@@ -220,6 +227,7 @@ class ResultService:
                 existing.poc_request = poc_artifacts['curl_request']
                 existing.poc_html = poc_artifacts['html_poc']
                 existing.screenshot_path = successful_exec.screenshot_path
+                existing.status = FindingStatus.CONFIRMED
                 findings.append(existing)
             else:
                 # Create new finding
@@ -234,7 +242,9 @@ class ResultService:
                     evidence_summary=(auditor_vuln or {}).get("evidence_summary"),
                     best_payload=test_case.payload,
                     severity=severity.value if hasattr(severity, "value") else severity,
-                    status=FindingStatus.DRAFT.value,
+                    # This path is reached only after an OracleStatus.HIT (or a
+                    # browser auditor's equivalent runtime proof).
+                    status=FindingStatus.CONFIRMED.value,
                     report_text=report_text,
                     evidence_refs=evidence_refs,
                     poc_request=poc_artifacts['curl_request'],
@@ -616,23 +626,27 @@ print(f"Payload in response: {{PAYLOAD in response.text}}")
         return impact["severity"]
 
     @staticmethod
-    def _parse_execution_logs(logs: Optional[str]) -> Dict[str, Any]:
-        if not logs:
-            return {}
-        for parser in (json.loads, ast.literal_eval):
-            try:
-                parsed = parser(logs)
-                if isinstance(parsed, dict):
-                    return parsed
-            except Exception:
-                continue
-        return {}
+    def _parse_execution_logs(
+        logs: Optional[str],
+        *,
+        test_case_id: Optional[int] = None,
+        attempt_no: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        return sanitize_execution_logs(
+            parse_execution_logs(logs),
+            test_case_id=test_case_id,
+            attempt_no=attempt_no,
+        )
 
     @staticmethod
     def _extract_auditor_vuln(execution: Optional[Execution]) -> Optional[Dict[str, Any]]:
         if not execution:
             return None
-        logs = ResultService._parse_execution_logs(execution.logs)
+        logs = ResultService._parse_execution_logs(
+            execution.logs,
+            test_case_id=execution.test_case_id,
+            attempt_no=execution.attempt_no,
+        )
         vuln = logs.get("auditor_vuln")
         return vuln if isinstance(vuln, dict) else None
 
@@ -864,3 +878,216 @@ An attacker could:
         if not execution:
             raise ValueError(f"Execution {execution_id} not found")
         return execution
+
+    @staticmethod
+    def enrich_finding(finding: Finding, db: Optional[Session] = None) -> Any:
+        """Enrich finding with target, endpoint, param, PoC URL, cURL, raw HTTP, and context metadata."""
+        from backend_api.schemas.result import FindingResponse
+
+        ep = finding.endpoint
+        pm = finding.param
+        ctx = finding.context
+        sk = finding.sink
+        target = ep.target if (ep and ep.target) else None
+
+        target_name = target.name if target else "Unknown Target"
+        target_domain = None
+        if target and target.base_url:
+            try:
+                target_domain = urllib.parse.urlparse(target.base_url).netloc or target.base_url
+            except Exception:
+                target_domain = target.base_url
+        elif ep and ep.url_pattern:
+            try:
+                target_domain = urllib.parse.urlparse(ep.url_pattern).netloc
+            except Exception:
+                target_domain = None
+
+        endpoint_url = ep.url_pattern if ep else None
+        endpoint_method = ep.method if ep else "GET"
+        param_name = pm.name if pm else None
+        param_location = pm.location if pm else "query"
+        context_type = ctx.context_type if ctx else None
+        sink_type = sk.sink_type if sk else None
+
+        payload = finding.best_payload or ""
+        clean_payload = payload
+        if param_name and payload.startswith(f"{param_name}="):
+            clean_payload = payload[len(f"{param_name}="):]
+
+        # 1. Prefer the exact request URL captured during successful execution.
+        # Reconstructing from best_payload can silently create a request that was
+        # never tested and is especially wrong for DOM probes and multi-step flows.
+        stored_poc_url = None
+        if isinstance(finding.poc_request, dict):
+            for key in ("url", "target_url", "hash_url"):
+                candidate = finding.poc_request.get(key)
+                if isinstance(candidate, str) and candidate.startswith(("http://", "https://")):
+                    stored_poc_url = candidate
+                    break
+
+        poc_url = endpoint_url
+        poc_source = "stored_request" if stored_poc_url else "reconstructed"
+        if stored_poc_url:
+            poc_url = stored_poc_url
+        elif endpoint_url:
+            try:
+                if param_location == "query" and param_name:
+                    url_parts = list(urllib.parse.urlparse(endpoint_url))
+                    query_params = dict(urllib.parse.parse_qsl(url_parts[4]))
+                    query_params[param_name] = clean_payload
+                    url_parts[4] = urllib.parse.urlencode(query_params)
+                    poc_url = urllib.parse.urlunparse(url_parts)
+                else:
+                    poc_url = endpoint_url
+            except Exception:
+                poc_url = endpoint_url
+
+        # Establish whether "confirmed" has the runtime evidence required for a
+        # browser-executable finding. Legacy/demo rows must remain manually testable
+        # without being presented as execution-confirmed.
+        refs = finding.evidence_refs if isinstance(finding.evidence_refs, dict) else {}
+        execution_ids = refs.get("execution_ids") if isinstance(refs.get("execution_ids"), list) else []
+        hit_execution = False
+        if db is not None and execution_ids:
+            hit_execution = (
+                db.query(Execution.id)
+                .filter(Execution.id.in_(execution_ids), Execution.oracle_status == OracleStatus.HIT)
+                .first()
+                is not None
+            )
+        if not hit_execution:
+            hit_execution = any(
+                observation.execution is not None
+                and observation.execution.oracle_status == OracleStatus.HIT
+                for observation in (finding.observations or [])
+            )
+
+        verification = refs.get("verification") if isinstance(refs.get("verification"), dict) else {}
+        runtime_verified = hit_execution or bool(verification.get("browser_executed"))
+        is_xss = "xss" in (finding.vuln_type or "").lower() or finding.scanner_module == "xss_fuzzer"
+        if is_xss:
+            is_verified = runtime_verified
+            verification_state = "browser_confirmed" if is_verified else "unverified"
+            verification_reason = (
+                "JavaScript execution was confirmed by a HIT execution."
+                if is_verified
+                else "No linked browser HIT/oracle evidence exists; manual testing is required."
+            )
+        else:
+            is_verified = runtime_verified or bool(finding.evidence_summary)
+            verification_state = "confirmed" if is_verified else "unverified"
+            verification_reason = (
+                "Auditor evidence is attached."
+                if is_verified and not runtime_verified
+                else "Runtime evidence is attached."
+                if runtime_verified
+                else "No structured auditor or runtime evidence is attached."
+            )
+
+        browser_replay_available = bool(refs.get("test_case_id"))
+
+        # 2. Compute cURL command
+        curl_command = None
+        if finding.poc_request and isinstance(finding.poc_request, dict):
+            curl_command = finding.poc_request.get("command")
+
+        if not curl_command and endpoint_url:
+            try:
+                cmd_parts = ["curl", "-i", "-s", "-k", "-X", endpoint_method]
+                if param_location == "query":
+                    cmd_parts.append(f'"{poc_url}"')
+                elif param_location == "body":
+                    cmd_parts.extend(["-d", f'"{param_name}={clean_payload}"'])
+                    cmd_parts.append(f'"{endpoint_url}"')
+                elif param_location == "json":
+                    cmd_parts.extend(["-H", '"Content-Type: application/json"'])
+                    cmd_parts.extend(["-d", f"'{json.dumps({param_name: clean_payload})}'"])
+                    cmd_parts.append(f'"{endpoint_url}"')
+                elif param_location == "header":
+                    cmd_parts.extend(["-H", f'"{param_name}: {clean_payload}"'])
+                    cmd_parts.append(f'"{endpoint_url}"')
+                elif param_location == "cookie":
+                    cmd_parts.extend(["-H", f'"Cookie: {param_name}={clean_payload}"'])
+                    cmd_parts.append(f'"{endpoint_url}"')
+                else:
+                    cmd_parts.append(f'"{endpoint_url}"')
+                curl_command = " ".join(cmd_parts)
+            except Exception:
+                curl_command = f"curl -X {endpoint_method} '{poc_url or endpoint_url}'"
+
+        # 3. Compute Raw HTTP Request for Burp Suite Repeater
+        raw_http_request = None
+        if endpoint_url:
+            try:
+                parsed = urllib.parse.urlparse(poc_url or endpoint_url)
+                path = parsed.path or "/"
+                if parsed.query:
+                    path += "?" + parsed.query
+                host = parsed.netloc or "localhost"
+
+                headers = [
+                    f"{endpoint_method} {path} HTTP/1.1",
+                    f"Host: {host}",
+                    "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language: en-US,en;q=0.5",
+                    "Connection: close",
+                ]
+                if param_location == "header" and param_name:
+                    headers.append(f"{param_name}: {clean_payload}")
+                if param_location == "cookie" and param_name:
+                    headers.append(f"Cookie: {param_name}={clean_payload}")
+
+                if param_location == "body" and param_name:
+                    body = f"{param_name}={clean_payload}"
+                    headers.append("Content-Type: application/x-www-form-urlencoded")
+                    headers.append(f"Content-Length: {len(body.encode('utf-8'))}")
+                    raw_http_request = "\r\n".join(headers) + "\r\n\r\n" + body
+                elif param_location == "json" and param_name:
+                    body = json.dumps({param_name: clean_payload})
+                    headers.append("Content-Type: application/json")
+                    headers.append(f"Content-Length: {len(body.encode('utf-8'))}")
+                    raw_http_request = "\r\n".join(headers) + "\r\n\r\n" + body
+                else:
+                    raw_http_request = "\r\n".join(headers) + "\r\n\r\n"
+            except Exception:
+                pass
+
+        return FindingResponse(
+            id=finding.id,
+            endpoint_id=finding.endpoint_id,
+            param_id=finding.param_id,
+            context_id=finding.context_id,
+            sink_id=finding.sink_id,
+            vuln_type=finding.vuln_type,
+            scanner_module=finding.scanner_module,
+            confidence=finding.confidence,
+            evidence_summary=finding.evidence_summary,
+            best_payload=finding.best_payload,
+            severity=finding.severity,
+            status=finding.status,
+            report_text=finding.report_text,
+            evidence_refs=finding.evidence_refs,
+            poc_request=finding.poc_request,
+            poc_html=finding.poc_html,
+            screenshot_path=finding.screenshot_path,
+            target_name=target_name,
+            target_domain=target_domain,
+            endpoint_url=endpoint_url,
+            endpoint_method=endpoint_method,
+            param_name=param_name,
+            param_location=param_location,
+            poc_url=poc_url,
+            poc_source=poc_source,
+            curl_command=curl_command,
+            raw_http_request=raw_http_request,
+            is_verified=is_verified,
+            verification_state=verification_state,
+            verification_reason=verification_reason,
+            browser_replay_available=browser_replay_available,
+            context_type=context_type,
+            sink_type=sink_type,
+            created_at=finding.created_at,
+            updated_at=finding.updated_at
+        )

@@ -211,3 +211,54 @@ def test_solution_serializes():
     d = sol.to_dict()
     assert d["status"] == "sat"
     assert "witness" in d and "attempted_recipes" in d
+
+
+def test_in_tag_handler_when_angle_bracket_blocked():
+    fc = FilterConstraints(blocked_chars={"<"})
+    sol = SMTBypassSolver().solve("ATTR_QUOTED_DOUBLE", fc, TOKEN)
+    assert sol.status is SolveStatus.SAT
+    assert "<" not in sol.witness
+    assert 'autofocus="' in sol.witness
+    assert sol.verified
+
+
+def test_js_string_script_breakout_when_quotes_blocked():
+    fc = FilterConstraints(blocked_chars={'"', "'"})
+    sol = SMTBypassSolver().solve("JS_STRING_DOUBLE", fc, TOKEN)
+    assert sol.status is SolveStatus.SAT
+    assert sol.witness.startswith("</script>")
+    assert sol.verified
+
+
+def test_quoteless_and_backtickless_regex_callback():
+    fc = FilterConstraints(blocked_chars={'"', "'", "`"})
+    sol = SMTBypassSolver().solve("HTML_TEXT", fc, TOKEN)
+    assert sol.status is SolveStatus.SAT
+    assert f"/{TOKEN}/.source" in sol.witness
+    assert sol.verified
+
+
+def test_style_block_breakout():
+    fc = FilterConstraints(blocked_substrings={"script"})
+    sol = SMTBypassSolver().solve("STYLE_BLOCK", fc, TOKEN)
+    assert sol.status is SolveStatus.SAT
+    assert sol.witness.startswith("</style>")
+    assert sol.verified
+
+
+def test_style_block_unsat_when_tag_close_blocked():
+    fc = FilterConstraints(blocked_chars={"<", ">"})
+    sol = SMTBypassSolver().solve("STYLE_BLOCK", fc, TOKEN)
+    assert sol.status is SolveStatus.UNSAT
+
+
+def test_expanded_tags_and_handlers_alphabet():
+    fc = FilterConstraints(blocked_substrings={
+        "img", "svg", "iframe", "video", "body", "details", "object",
+        "onerror", "onload", "onfocus", "onpointer", "ontoggle", "onanimation", "onbegin", "onmouseover"
+    })
+    sol = SMTBypassSolver().solve("HTML_TEXT", fc, TOKEN)
+    assert sol.status is SolveStatus.SAT
+    assert sol.verified
+
+

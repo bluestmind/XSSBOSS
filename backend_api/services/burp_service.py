@@ -45,12 +45,14 @@ class BurpService:
         seed_url = BurpService._canonical_seed_url(url)
         kwargs: Dict[str, Any] = {
             "timeout": BurpService.SCAN_PREFLIGHT_TIMEOUT,
-            "follow_redirects": True,
+            # Do not let a preflight redirect send scanner traffic outside the
+            # authorized seed origin before program scope has been evaluated.
+            "follow_redirects": False,
             "trust_env": False,
-            "verify": False,
+            "verify": not settings.ALLOW_INSECURE_TLS,
         }
         if proxy_url:
-            kwargs["proxies"] = proxy_url
+            kwargs["proxy"] = proxy_url
 
         headers = {
             "User-Agent": "XSSBoss-Burp-Seed-Preflight/1.0",
@@ -58,7 +60,12 @@ class BurpService:
         }
         try:
             with httpx.Client(**kwargs) as client:
-                response = client.get(seed_url, headers=headers)
+                from backend_api.utils.rate_limiter import rate_limited_call
+
+                response = rate_limited_call(
+                    seed_url,
+                    lambda: client.get(seed_url, headers=headers),
+                )
             return {
                 "url": seed_url,
                 "reachable": response.status_code < 500,
@@ -101,9 +108,8 @@ class BurpService:
                 add_seed(final_url)
 
             add_seed(original)
-            parsed = urlparse(original)
-            alternate_scheme = "http" if parsed.scheme == "https" else "https"
-            add_seed(BurpService._scheme_variant(original, alternate_scheme))
+            # The platform scope may authorize one scheme only. Callers can
+            # submit both schemes explicitly when both are in scope.
 
         return {
             "urls": seed_urls,
@@ -284,6 +290,7 @@ class BurpService:
         task_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Query a Burp Suite REST API scan task and import issue URLs."""
+        encoded_task_id = BurpService._normalize_task_id(task_id)
         if not getattr(settings, "BURP_ENABLED", True):
             return {
                 "status": "disabled",
@@ -297,13 +304,12 @@ class BurpService:
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 
-        encoded_task_id = BurpService._normalize_task_id(task_id)
         task_path = f"scan/{encoded_task_id}"
         task_url = BurpService._build_url(api_url, api_key, task_path)
         logger.info(f"Querying Burp REST API scan task: {task_url}")
         
         try:
-            with httpx.Client(timeout=10.0, headers=headers, verify=False, trust_env=False) as client:
+            with httpx.Client(timeout=10.0, headers=headers, verify=not settings.ALLOW_INSECURE_TLS, trust_env=False) as client:
                 task_resp, task_url = BurpService._request_burp(client, "GET", api_url, api_key, task_path)
                 if task_resp.status_code != 200:
                     raise Exception(f"Burp API returned HTTP {task_resp.status_code} from {task_url}: {task_resp.text}")
@@ -439,12 +445,25 @@ class BurpService:
     def trigger_scan(
         api_url: str,
         target_urls: List[str],
-        api_key: Optional[str] = None
+        api_key: Optional[str] = None,
+        startup_timeout_seconds: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Trigger a new scan task inside Burp Suite via the REST API."""
         if not getattr(settings, "BURP_ENABLED", True):
             logger.info("Burp Suite scan trigger skipped: Burp integration is disabled.")
             return {"status": "disabled", "task_id": None}
+        if getattr(settings, "BURP_AUTO_START", False):
+            from backend_api.services.burp_runtime_service import BurpRuntimeService
+
+            try:
+                runtime = BurpRuntimeService.ensure_available(
+                    api_url,
+                    api_key,
+                    timeout_seconds=startup_timeout_seconds,
+                )
+                logger.info("Burp runtime ready: %s", runtime)
+            except Exception as error:
+                raise ValueError(f"Burp automatic startup failed: {error}") from error
             
         headers = {}
         if api_key:
@@ -460,7 +479,7 @@ class BurpService:
         }
         
         try:
-            with httpx.Client(timeout=10.0, headers=headers, verify=False, trust_env=False) as client:
+            with httpx.Client(timeout=10.0, headers=headers, verify=not settings.ALLOW_INSECURE_TLS, trust_env=False) as client:
                 resp, scan_url = BurpService._request_burp(client, "POST", api_url, api_key, "scan", json=payload)
                 if resp.status_code == 400 and "protocol" in resp.text.lower():
                     fallback_payload = {
@@ -560,7 +579,7 @@ class BurpService:
         url = BurpService._build_url(api_url, api_key, f"scan/{encoded_task_id}")
         
         try:
-            with httpx.Client(timeout=10.0, headers=headers, verify=False, trust_env=False) as client:
+            with httpx.Client(timeout=10.0, headers=headers, verify=not settings.ALLOW_INSECURE_TLS, trust_env=False) as client:
                 resp, url = BurpService._request_burp(client, "GET", api_url, api_key, f"scan/{encoded_task_id}")
                 if resp.status_code != 200:
                     raise Exception(f"Burp API returned HTTP {resp.status_code}: {resp.text}")
@@ -580,7 +599,7 @@ class BurpService:
         url = BurpService._build_url(api_url, api_key, f"scan/{encoded_task_id}")
         
         try:
-            with httpx.Client(timeout=10.0, headers=headers, verify=False, trust_env=False) as client:
+            with httpx.Client(timeout=10.0, headers=headers, verify=not settings.ALLOW_INSECURE_TLS, trust_env=False) as client:
                 resp, url = BurpService._request_burp(client, "DELETE", api_url, api_key, f"scan/{encoded_task_id}")
                 if resp.status_code not in (200, 202, 204):
                     raise Exception(f"Burp API returned HTTP {resp.status_code}: {resp.text}")
@@ -599,7 +618,7 @@ class BurpService:
         url = BurpService._build_url(api_url, api_key, "knowledge_base/issue_definitions")
         
         try:
-            with httpx.Client(timeout=10.0, headers=headers, verify=False, trust_env=False) as client:
+            with httpx.Client(timeout=10.0, headers=headers, verify=not settings.ALLOW_INSECURE_TLS, trust_env=False) as client:
                 resp, url = BurpService._request_burp(client, "GET", api_url, api_key, "knowledge_base/issue_definitions")
                 if resp.status_code != 200:
                     raise Exception(f"Burp API returned HTTP {resp.status_code}: {resp.text}")
@@ -732,3 +751,105 @@ class BurpService:
                 logger.info(f"Auto-forwarded verified finding {finding.id} to Burp Repeater & Issues queues.")
         except Exception as e:
             logger.error(f"Failed to auto-forward finding {finding.id if finding else 'None'} to Burp: {e}", exc_info=True)
+
+    @staticmethod
+    def bulk_import_sitemap(db: Session, target_id: int, items: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Ingest a batch of request/response items from Burp SiteMap into target endpoints."""
+        created_count = 0
+        skipped_count = 0
+        error_count = 0
+
+        for item in items:
+            try:
+                url = item.get("url")
+                if not url:
+                    skipped_count += 1
+                    continue
+                method = (item.get("method") or "GET").upper()
+                headers = item.get("headers") or {}
+                body = item.get("body")
+                response_body = item.get("response_body") or ""
+
+                request_data = {
+                    "method": method,
+                    "url": url,
+                    "headers": headers,
+                    "query": {},
+                    "body": body,
+                    "json": None,
+                }
+                if "?" in url:
+                    from urllib.parse import urlparse, parse_qs
+                    parsed = urlparse(url)
+                    request_data["query"] = {
+                        k: v[0] if len(v) == 1 else v
+                        for k, v in parse_qs(parsed.query, keep_blank_values=True).items()
+                    }
+
+                response_data = {"body": response_body} if response_body else None
+
+                endpoint = ReconService.create_endpoint_from_request(
+                    db=db,
+                    target_id=target_id,
+                    method=method,
+                    url=url,
+                    request_data=request_data,
+                    response_data=response_data,
+                )
+                if endpoint:
+                    created_count += 1
+                else:
+                    skipped_count += 1
+            except Exception as e:
+                logger.error(f"Error importing sitemap item {item.get('url')}: {e}")
+                error_count += 1
+
+        return {
+            "status": "success",
+            "imported_count": created_count,
+            "skipped_count": skipped_count,
+            "error_count": error_count,
+            "total_processed": len(items),
+        }
+
+    @staticmethod
+    def check_session_health(
+        target_url: str,
+        proxy_url: Optional[str] = None,
+        headers: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """Verify if upstream session/auth through proxy is currently active."""
+        kwargs: Dict[str, Any] = {
+            "timeout": 8.0,
+            "follow_redirects": False,
+            "verify": not settings.ALLOW_INSECURE_TLS,
+            "trust_env": False,
+        }
+        if proxy_url:
+            kwargs["proxy"] = proxy_url
+
+        try:
+            with httpx.Client(**kwargs) as client:
+                from backend_api.utils.rate_limiter import rate_limited_call
+
+                resp = rate_limited_call(
+                    target_url,
+                    lambda: client.get(target_url, headers=headers or {}),
+                )
+            status_code = resp.status_code
+            is_auth = status_code not in (401, 403) and not (300 <= status_code < 400 and "/login" in resp.headers.get("Location", "").lower())
+            return {
+                "alive": True,
+                "status_code": status_code,
+                "authenticated": is_auth,
+                "location": resp.headers.get("Location"),
+                "proxy": proxy_url,
+            }
+        except Exception as exc:
+            return {
+                "alive": False,
+                "status_code": None,
+                "authenticated": False,
+                "error": str(exc),
+                "proxy": proxy_url,
+            }

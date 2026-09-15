@@ -18,6 +18,7 @@ from backend_api.utils.impact_scorer import ImpactScorer
 from backend_api.utils.modern_xss_profiles import ModernXSSProfiles
 from backend_api.utils.scope_guard import is_endpoint_in_scope
 from backend_api.utils.tokenizer import Tokenizer
+from backend_api.utils.log_serializer import serialize_execution_logs
 from browser_workers.executor import BrowserExecutor
 
 
@@ -406,10 +407,15 @@ class ModernDOMProbeExecutor:
     ) -> Execution:
         execution = Execution(
             test_case_id=test_case.id,
+            attempt_no=1,
             browser_worker_id=f"modern-dom-probe:{probe['family']}",
             oracle_status=OracleStatus.HIT if result.get("oracle_hit") else OracleStatus.MISSED,
             oracle_token=test_case.token if result.get("oracle_hit") else None,
-            logs=str(result.get("logs", {})),
+            logs=serialize_execution_logs(
+                result.get("logs", {}),
+                test_case_id=test_case.id,
+                attempt_no=1,
+            ),
             screenshot_path=result.get("screenshot_path"),
             dom_snapshot=result.get("dom_snapshot"),
             duration_ms=result.get("duration_ms"),

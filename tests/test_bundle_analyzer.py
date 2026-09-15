@@ -50,3 +50,63 @@ def test_sensitive_bundle_values_are_fingerprinted_not_returned():
     assert finding["length"] == len(secret)
     assert len(finding["fingerprint"]) == 64
     assert secret not in str(finding)
+
+
+def test_bundle_uses_script_url_as_passive_library_evidence():
+    secret = "private-query-value"
+    res = BundleAnalyzer.analyze_script_content(
+        f"https://cdn.example.test/jquery-3.4.1.min.js?token={secret}",
+        "",
+        analyze_sourcemaps=False,
+    )
+
+    assert {item["ref"] for item in res["vulnerable_libraries"]} == {"CVE-2020-11022"}
+    assert {item["source"] for item in res["vulnerable_libraries"]} == {"script_url"}
+    assert res["url"] == "https://cdn.example.test/jquery-3.4.1.min.js"
+    assert secret not in str(res)
+
+
+def test_bundle_forwards_response_headers_to_sourcemap_analysis(monkeypatch):
+    observed = {}
+
+    def fake_analyze(_self, script_url, script_content=None, response_headers=None):
+        observed.update(
+            script_url=script_url,
+            script_content=script_content,
+            response_headers=response_headers,
+        )
+        return []
+
+    monkeypatch.setattr(
+        "recon_engine.bundle_analyzer.SourceMapAnalyzer.analyze_script_for_sourcemap",
+        fake_analyze,
+    )
+    headers = {"SourceMap": "maps/app.js.map"}
+    BundleAnalyzer.analyze_script_content(
+        "https://target.test/assets/app.js",
+        "console.log('ok')",
+        response_headers=headers,
+    )
+
+    assert observed == {
+        "script_url": "https://target.test/assets/app.js",
+        "script_content": "console.log('ok')",
+        "response_headers": headers,
+    }
+
+
+def test_bundle_analysis_has_a_hard_input_boundary(monkeypatch):
+    monkeypatch.setattr(BundleAnalyzer, "MAX_SCRIPT_CHARS", 80)
+    outside = 'target.postMessage("ready", "*");'
+    content = ("const safe = 1;" + (" " * 100) + outside)
+
+    result = BundleAnalyzer.analyze_script_content(
+        "https://target.test/app.js",
+        content,
+        analyze_sourcemaps=False,
+    )
+
+    assert result["size_bytes"] == len(content)
+    assert result["analyzed_chars"] == 80
+    assert result["analysis_truncated"] is True
+    assert result["client_trust_findings"] == []

@@ -1,5 +1,5 @@
 """Endpoint schemas."""
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, field_serializer
 from typing import Optional, Dict, Any
 from datetime import datetime
 
@@ -27,6 +27,13 @@ class EndpointResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    @field_serializer("auth_context")
+    def redact_auth_context(self, value: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if value is None:
+            return None
+        from backend_api.services.auth_session_service import AuthSessionService
+
+        return AuthSessionService.sanitize_public(value)
+
+    model_config = ConfigDict(from_attributes=True)
 

@@ -11,8 +11,67 @@ from backend_api.services.bounty_report_service import BountyReportService
 from backend_api.models.evidence import EvidenceArtifact
 from backend_api.models.execution import Execution
 from backend_api.routers.artifacts import _download_response
+from backend_api.utils.log_serializer import (
+    parse_execution_logs,
+    safe_unparsed_execution_log_text,
+    serialize_execution_logs,
+)
 
 router = APIRouter(prefix="/results", tags=["results"])
+
+
+def _safe_execution_response(execution: Execution) -> dict:
+    parsed = parse_execution_logs(execution.logs)
+    safe_logs = (
+        serialize_execution_logs(
+            parsed,
+            test_case_id=execution.test_case_id,
+            attempt_no=execution.attempt_no,
+        )
+        if parsed
+        else safe_unparsed_execution_log_text(execution.logs)
+    )
+    return {
+        "id": execution.id,
+        "test_case_id": execution.test_case_id,
+        "browser_worker_id": execution.browser_worker_id,
+        "oracle_status": execution.oracle_status,
+        "oracle_token": execution.oracle_token,
+        "logs": safe_logs,
+        "screenshot_path": execution.screenshot_path,
+        "dom_snapshot": execution.dom_snapshot,
+        "executed_at": execution.executed_at,
+        "duration_ms": execution.duration_ms,
+        "created_at": execution.created_at,
+        "updated_at": execution.updated_at,
+    }
+
+
+@router.get("/sarif/{experiment_id}")
+def experiment_sarif(experiment_id: int, db: Session = Depends(get_db)):
+    """Findings as SARIF 2.1.0 — drops straight into GitHub code-scanning / DefectDojo / CI."""
+    from backend_api.services.sarif_report_service import SarifReportService
+    return SarifReportService.build_for_experiment(db, experiment_id)
+
+
+@router.get("/bug-classes")
+def bug_classes():
+    """The vulnerability-class subsystems this tool covers (XSS + the auditor suite)."""
+    from backend_api.services.bug_class_registry import BugClassRegistry
+    classes = [{"key": b.key, "name": b.name, "kind": b.kind, "severity": b.default_severity,
+                "description": b.description} for b in BugClassRegistry.all()]
+    return {"count": len(classes), "bug_classes": classes}
+
+
+@router.get("/coverage/{experiment_id}")
+def experiment_coverage(experiment_id: int, db: Session = Depends(get_db)):
+    """Epistemic coverage verdict for an experiment — the 'never falsely report clean' report.
+
+    Returns the decided fraction, confirmed vulnerabilities, and the ranked undecided surface
+    (inconclusive/unreached) that a human must close to push winrate toward 100%.
+    """
+    from backend_api.services.ledger_service import LedgerService
+    return LedgerService.coverage_for_experiment(db, experiment_id)
 
 
 @router.get("/findings", response_model=List[FindingResponse])
@@ -35,7 +94,7 @@ def list_findings(
         skip=skip,
         limit=limit
     )
-    return findings
+    return [ResultService.enrich_finding(f, db=db) for f in findings]
 
 
 @router.get("/findings/{finding_id}", response_model=FindingResponse)
@@ -43,7 +102,7 @@ def get_finding(finding_id: int, db: Session = Depends(get_db)):
     """Get a finding by ID."""
     try:
         finding = ResultService.get_finding(db, finding_id)
-        return finding
+        return ResultService.enrich_finding(finding, db=db)
     except HTTPException:
         raise
     except Exception as e:
@@ -106,7 +165,7 @@ def list_executions(
         skip=skip,
         limit=limit
     )
-    return executions
+    return [_safe_execution_response(execution) for execution in executions]
 
 
 @router.get("/executions/{execution_id}", response_model=ExecutionResponse)
@@ -114,7 +173,7 @@ def get_execution(execution_id: int, db: Session = Depends(get_db)):
     """Get an execution by ID."""
     try:
         execution = ResultService.get_execution(db, execution_id)
-        return execution
+        return _safe_execution_response(execution)
     except HTTPException:
         raise
     except Exception as e:
@@ -138,6 +197,8 @@ def replay_finding_poc(finding_id: int, db: Session = Depends(get_db)):
         return {"status": "success", "message": f"Replay task queued for test case {test_case_id}."}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

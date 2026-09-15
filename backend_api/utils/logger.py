@@ -17,6 +17,15 @@ def setup_logging():
     # Set specific loggers
     logging.getLogger("uvicorn").setLevel(logging.INFO)
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+
+    # Attach diagnostic log bridge
+    try:
+        from backend_api.services.log_service import PythonLogHandlerBridge
+        bridge_handler = PythonLogHandlerBridge()
+        bridge_handler.setLevel(logging.DEBUG)
+        logging.getLogger().addHandler(bridge_handler)
+    except Exception:
+        pass
     
     return logging.getLogger(__name__)
 

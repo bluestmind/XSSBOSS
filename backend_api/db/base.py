@@ -1,4 +1,5 @@
 """Database initialization."""
+"""Database initialization."""
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from backend_api.config import settings
@@ -8,7 +9,7 @@ import backend_api.models  # noqa: F401 - register all SQLAlchemy models
 # Create engine
 _connect_args = {}
 if settings.DATABASE_URL.startswith("sqlite"):
-    _connect_args = {"timeout": 30, "check_same_thread": False}
+    _connect_args = {"timeout": 60.0, "check_same_thread": False}
 
 engine = create_engine(
     settings.DATABASE_URL,
@@ -23,8 +24,13 @@ if settings.DATABASE_URL.startswith("sqlite"):
 
     @event.listens_for(engine, "connect")
     def _set_wal_mode(dbapi_conn, _):
-        dbapi_conn.execute("PRAGMA journal_mode=WAL")
-        dbapi_conn.execute("PRAGMA busy_timeout=30000")
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
+        cursor.execute("PRAGMA synchronous=NORMAL;")
+        cursor.execute("PRAGMA busy_timeout=60000;")
+        cursor.execute("PRAGMA cache_size=-64000;")
+        cursor.execute("PRAGMA temp_store=MEMORY;")
+        cursor.close()
 
 # Create session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

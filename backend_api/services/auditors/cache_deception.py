@@ -10,9 +10,11 @@ from typing import Any, Dict, Iterable, List, Optional
 import httpx
 from sqlalchemy.orm import Session
 
+from backend_api.config import settings
 from backend_api.models.endpoint import Endpoint
 from backend_api.models.finding import Finding, FindingStatus, Severity
 from backend_api.utils.logger import logger
+from backend_api.utils.rate_limiter import rate_limited_call
 
 
 class CacheDeceptionAuditor:
@@ -72,9 +74,16 @@ class CacheDeceptionAuditor:
         base_path = parsed.path.rstrip("/")
         test_path = f"{base_path}{suffix}"
         test_url = urllib.parse.urlunparse((parsed.scheme, parsed.netloc, test_path, parsed.params, parsed.query, parsed.fragment))
+        from backend_api.utils.stealth import get_http_proxy_kwargs
+        proxy_kwargs = get_http_proxy_kwargs(rotated=True)
 
-        with httpx.Client(timeout=4.0, follow_redirects=True, verify=False) as client:
-            resp = client.get(test_url)
+        with httpx.Client(
+            timeout=4.0,
+            follow_redirects=True,
+            verify=not settings.ALLOW_INSECURE_TLS,
+            **proxy_kwargs,
+        ) as client:
+            resp = rate_limited_call(test_url, lambda: client.get(test_url))
             headers_lower = {k.lower(): str(v).lower() for k, v in resp.headers.items()}
             
             # Check 1: Did the server return 200 OK with dynamic/HTML body?

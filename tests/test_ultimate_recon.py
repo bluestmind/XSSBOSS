@@ -77,36 +77,29 @@ class TestUltimateRecon(unittest.TestCase):
         self.assertIn("https://example.com/otx-endpoint?id=1", urls)
         self.assertIn("https://example.com/urlscan-endpoint", urls)
 
-    @patch("urllib.request.urlopen")
-    def test_robots_and_sitemaps_harvesting(self, mock_urlopen):
+    def test_robots_and_sitemaps_harvesting(self):
         """Verify robots.txt and sitemap.xml endpoints are harvested."""
-        def urlopen_side_effect(req, timeout=None):
-            url = req.full_url if hasattr(req, 'full_url') else str(req)
+        def fetch_side_effect(url, **_kwargs):
             if "robots.txt" in url:
-                content = b"User-agent: *\nDisallow: /private-admin\nAllow: /checkout-portal\nSitemap: https://example.com/sitemap.xml\n"
-                return MockResponse(content)
+                return "User-agent: *\nDisallow: /private-admin\nAllow: /checkout-portal\nSitemap: https://example.com/sitemap.xml\n"
             elif "sitemap.xml" in url:
-                xml_content = b'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://example.com/sitemap-route-1</loc></url></urlset>'
-                return MockResponse(xml_content)
-            return MockResponse(b"", status=404)
-
-        mock_urlopen.side_effect = urlopen_side_effect
+                return '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://example.com/sitemap-route-1</loc></url></urlset>'
+            return ""
 
         db = MagicMock()
         target = Target(id=1, base_url="https://example.com")
         db.query().filter().first.return_value = target
         recon = self.AdvancedRecon(db, 1)
+        recon._fetch_active_text = MagicMock(side_effect=fetch_side_effect)
 
         urls = recon.fetch_robots_and_sitemaps("https://example.com")
         self.assertIn("https://example.com/private-admin", urls)
         self.assertIn("https://example.com/checkout-portal", urls)
         self.assertIn("https://example.com/sitemap-route-1", urls)
 
-    @patch("urllib.request.urlopen")
-    def test_openapi_spec_probe(self, mock_urlopen):
+    def test_openapi_spec_probe(self):
         """Verify OpenAPI/Swagger specifications are parsed for endpoints."""
-        def urlopen_side_effect(req, timeout=None):
-            url = req.full_url if hasattr(req, 'full_url') else str(req)
+        def fetch_side_effect(url, **_kwargs):
             if "openapi.json" in url:
                 spec = {
                     "openapi": "3.0.0",
@@ -115,15 +108,14 @@ class TestUltimateRecon(unittest.TestCase):
                         "/api/v1/checkout/redirect": {"post": {}}
                     }
                 }
-                return MockResponse(json.dumps(spec).encode("utf-8"), headers={"Content-Type": "application/json"})
-            return MockResponse(b"", status=404)
-
-        mock_urlopen.side_effect = urlopen_side_effect
+                return json.dumps(spec)
+            return ""
 
         db = MagicMock()
         target = Target(id=1, base_url="https://example.com")
         db.query().filter().first.return_value = target
         recon = self.AdvancedRecon(db, 1)
+        recon._fetch_active_text = MagicMock(side_effect=fetch_side_effect)
 
         urls = recon.probe_api_specs("https://example.com")
         self.assertIn("https://example.com/api/v1/auth/callback", urls)

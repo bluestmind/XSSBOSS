@@ -1,0 +1,19 @@
+{
+  "openapi": "3.1.0",
+  "info": {"title": "Example inventory source", "version": "1.0.0"},
+  "servers": [{"url": "https://example.com"}],
+  "paths": {
+    "/api/users/{id}": {
+      "get": {
+        "operationId": "getUser",
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
+      }
+    },
+    "/api/search": {
+      "get": {
+        "operationId": "search",
+        "parameters": [{"name": "q", "in": "query", "schema": {"type": "string"}}]
+      }
+    }
+  }
+}

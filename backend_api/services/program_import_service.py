@@ -204,9 +204,25 @@ class HackerOneProgramClient:
         self.max_scopes = max_scopes
         self.profile_metadata = profile_metadata
         self.imported_at = imported_at
-        self.auth = _hackerone_auth()
+        try:
+            self.auth = _hackerone_auth()
+        except RuntimeError:
+            self.auth = None
 
     def fetch_programs(self, handles: Optional[Sequence[str]] = None) -> List[NormalizedProgram]:
+        if not self.auth:
+            from backend_api.services.hackerone_scraper_service import HackerOneScraperService
+            scraped = (
+                [HackerOneScraperService.fetch_program_by_handle(h) for h in handles if HackerOneScraperService.fetch_program_by_handle(h)]
+                if handles
+                else HackerOneScraperService.fetch_all_programs(bounty_only=False, limit=self.limit)
+            )
+            programs: List[NormalizedProgram] = []
+            for p in scraped:
+                if p:
+                    programs.append(self._normalize_scraped(p))
+            return programs[: self.limit]
+
         with httpx.Client(timeout=30.0, auth=self.auth, headers={"Accept": "application/json"}) as client:
             raw_programs = (
                 [self._fetch_program(client, handle) for handle in handles]
@@ -223,6 +239,58 @@ class HackerOneProgramClient:
                 scopes = self._fetch_structured_scopes(client, handle)
                 programs.append(self._normalize(raw_program, scopes))
             return programs
+
+    def _normalize_scraped(self, p: Dict[str, Any]) -> NormalizedProgram:
+        handle = p.get("handle") or "unknown"
+        name = p.get("name") or handle
+        program_url = p.get("url") or f"https://hackerone.com/{handle}"
+        in_scope = [t.get("asset_identifier") for t in p.get("in_scope", []) if t.get("asset_identifier")]
+        out_of_scope = [t.get("asset_identifier") for t in p.get("out_of_scope", []) if t.get("asset_identifier")]
+        base_url = p.get("primary_url") or _choose_base_url(in_scope) or program_url
+
+        scope_tags = {
+            "platform": "hackerone",
+            "source": "hackerone_public_scraper",
+            "program_key": handle,
+            "program_handle": handle,
+            "program_url": program_url,
+            "imported_at": self.imported_at,
+            "last_synced_at": self.imported_at,
+            "in_scope": in_scope,
+            "out_of_scope": out_of_scope,
+            "structured_scopes": p.get("in_scope", []),
+            "program": {
+                "id": p.get("id"),
+                "name": name,
+                "handle": handle,
+                "offers_bounties": p.get("offers_bounties"),
+                "submission_state": p.get("submission_state"),
+            },
+        }
+        if self.profile_metadata:
+            scope_tags["browser_profile"] = self.profile_metadata
+
+        return NormalizedProgram(
+            platform="hackerone",
+            program_key=handle,
+            name=name,
+            base_url=base_url,
+            program_url=program_url,
+            notes=_build_notes(
+                platform="HackerOne",
+                name=name,
+                program_url=program_url,
+                imported_at=self.imported_at,
+                in_scope_count=len(in_scope),
+                out_scope_count=len(out_of_scope),
+                extra=[
+                    f"Handle: {handle}",
+                    f"Submission state: {p.get('submission_state') or 'unknown'}",
+                    f"Offers bounties: {_yes_no(p.get('offers_bounties'))}",
+                ],
+            ),
+            scope_tags=scope_tags,
+        )
 
     def _fetch_program_list(self, client: httpx.Client) -> List[Dict[str, Any]]:
         programs: List[Dict[str, Any]] = []

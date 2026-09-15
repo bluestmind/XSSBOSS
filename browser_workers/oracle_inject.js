@@ -8,25 +8,714 @@
     // Get token and oracle URL from window (set by executor)
     const token = window.__XSS_TOKEN__ || '';
     const oracleUrl = window.__ORACLE_URL__ || '/api/v1/oracle';
+    const lineageProbe = window.__XSS_LINEAGE_PROBE__ === true;
     
     if (!token) {
         console.warn('XSS Oracle: No token provided');
         return;
     }
     
-    // Define __XSS__ callback function with structural metadata parsing
-    const taintMarkers = {
-        'location.href': '__taint_loc_href__',
-        'location.search': '__taint_loc_search__',
-        'location.hash': '__taint_loc_hash__',
-        'location.pathname': '__taint_loc_path__',
-        'document.URL': '__taint_doc_url__',
-        'document.documentURI': '__taint_doc_uri__',
-        'document.baseURI': '__taint_doc_base__',
-        'document.referrer': '__taint_doc_ref__',
-        'window.name': '__taint_win_name__',
-        'postMessage': '__taint_postmsg__'
+    // Runtime causal lineage is deliberately observational. Source getters return
+    // the browser's exact value; correlation is kept in a bounded side ledger so
+    // strict equality checks, signatures, parsing, and application control flow
+    // retain native semantics.
+    const CAUSAL_MAX_EVENTS = 256;
+    const CAUSAL_MAX_DEPTH = 8;
+    const CAUSAL_TTL_MS = 5000;
+    // Page code is untrusted and may replace mutable prototype methods after
+    // initialization. Capture the intrinsics used by the evidence ledger.
+    const causalReflectApply = Reflect.apply;
+    const causalObjectDefineProperty = Object.defineProperty;
+    const causalJson = JSON;
+    const causalJsonStringify = JSON.stringify;
+    const causalStringIncludes = String.prototype.includes;
+    const causalStringCharCodeAt = String.prototype.charCodeAt;
+    const causalStringIndexOf = String.prototype.indexOf;
+    const causalStringLastIndexOf = String.prototype.lastIndexOf;
+    const causalStringMatch = String.prototype.match;
+    const causalStringReplace = String.prototype.replace;
+    const causalStringSlice = String.prototype.slice;
+    const causalStringSplit = String.prototype.split;
+    const causalStringSubstring = String.prototype.substring;
+    const causalStringToLowerCase = String.prototype.toLowerCase;
+    const causalStringTrim = String.prototype.trim;
+    const causalNumberIsNaN = Number.isNaN;
+    const causalObjectIs = Object.is;
+    const causalNativeString = String;
+    const causalNativeNumber = Number;
+    const causalNativeParseInt = parseInt;
+    const causalNumberToString = Number.prototype.toString;
+    const causalPerformanceNow = performance && performance.now;
+    const causalDateNow = Date.now;
+    const causalMathCeil = Math.ceil;
+    const causalMathFloor = Math.floor;
+    const causalMathMax = Math.max;
+    const causalSetHas = Set.prototype.has;
+    const causalRegExpTest = RegExp.prototype.test;
+    const causalNativeUint8Array = Uint8Array;
+    const causalNativeUint32Array = Uint32Array;
+    const causalUint8ArraySet = Uint8Array.prototype.set;
+    const causalNativeURL = window.URL;
+    const causalNativeTextEncoder = window.TextEncoder;
+    const causalNativeTextEncoderEncode = causalNativeTextEncoder
+        ? causalNativeTextEncoder.prototype.encode
+        : null;
+    const causalNativeQueueMicrotask = typeof window.queueMicrotask === 'function'
+        ? window.queueMicrotask.bind(window)
+        : null;
+    const causalNativePromiseThen = window.Promise && Promise.prototype.then;
+    const causalNativePromiseResolve = window.Promise && Promise.resolve;
+    const causalAllowedSources = new Set([
+        'location.href', 'location.search', 'location.hash', 'location.pathname',
+        'document.URL', 'document.documentURI', 'document.URLUnencoded',
+        'document.baseURI', 'document.referrer', 'window.name', 'postMessage'
+    ]);
+    const causalState = {
+        events: [],
+        droppedEvents: 0,
+        nextEventId: 1,
+        nextContextId: 1,
+        activeContext: null,
+        syncContext: null,
+        syncClearPending: false
     };
+
+    function causalApply(fn, receiver, args) {
+        return causalReflectApply(fn, receiver, args);
+    }
+
+    function causalIncludes(value, search) {
+        return typeof value === 'string'
+            && typeof search === 'string'
+            && causalApply(causalStringIncludes, value, [search]);
+    }
+
+    function causalIncludesToken(value) {
+        return causalIncludes(value, token);
+    }
+
+    function causalStringCall(method, value, args) {
+        return causalApply(method, value, args);
+    }
+
+    function causalIndexOf(value, search) {
+        return causalStringCall(causalStringIndexOf, value, [search]);
+    }
+
+    function causalRegExpMatches(pattern, value) {
+        return causalApply(causalRegExpTest, pattern, [value]);
+    }
+
+    function causalAppend(array, value) {
+        causalObjectDefineProperty(array, array.length, {
+            value: value,
+            configurable: true,
+            enumerable: true,
+            writable: true
+        });
+    }
+
+    function causalSuppressToJSON(value) {
+        // Native JSON.stringify consults inherited toJSON properties before it
+        // visits fields. Shadow both Object.prototype.toJSON and
+        // Array.prototype.toJSON so page code cannot rewrite the export.
+        causalObjectDefineProperty(value, 'toJSON', {
+            value: undefined,
+            configurable: false,
+            enumerable: false,
+            writable: false
+        });
+        return value;
+    }
+
+    function causalNow() {
+        try {
+            return causalApply(causalMathMax, Math, [
+                0,
+                causalApply(causalMathFloor, Math, [
+                    causalApply(causalPerformanceNow, performance, [])
+                ])
+            ]);
+        } catch (err) {
+            return causalApply(causalDateNow, Date, []);
+        }
+    }
+
+    const causalSha256Constants = [
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+    ];
+
+    function causalUtf8Bytes(text) {
+        if (causalNativeTextEncoder) {
+            try {
+                return causalApply(
+                    causalNativeTextEncoderEncode,
+                    new causalNativeTextEncoder(),
+                    [text]
+                );
+            } catch (err) {}
+        }
+        const bytes = [];
+        for (let index = 0; index < text.length; index++) {
+            let code = causalStringCall(causalStringCharCodeAt, text, [index]);
+            if (code >= 0xd800 && code <= 0xdbff && index + 1 < text.length) {
+                const low = causalStringCall(causalStringCharCodeAt, text, [index + 1]);
+                if (low >= 0xdc00 && low <= 0xdfff) {
+                    code = 0x10000 + ((code - 0xd800) << 10) + (low - 0xdc00);
+                    index++;
+                }
+            }
+            if (code < 0x80) {
+                causalAppend(bytes, code);
+            } else if (code < 0x800) {
+                causalAppend(bytes, 0xc0 | (code >>> 6));
+                causalAppend(bytes, 0x80 | (code & 0x3f));
+            } else if (code < 0x10000) {
+                causalAppend(bytes, 0xe0 | (code >>> 12));
+                causalAppend(bytes, 0x80 | ((code >>> 6) & 0x3f));
+                causalAppend(bytes, 0x80 | (code & 0x3f));
+            } else {
+                causalAppend(bytes, 0xf0 | (code >>> 18));
+                causalAppend(bytes, 0x80 | ((code >>> 12) & 0x3f));
+                causalAppend(bytes, 0x80 | ((code >>> 6) & 0x3f));
+                causalAppend(bytes, 0x80 | (code & 0x3f));
+            }
+        }
+        return new causalNativeUint8Array(bytes);
+    }
+
+    function causalRotateRight(value, bits) {
+        return (value >>> bits) | (value << (32 - bits));
+    }
+
+    // Synchronous SHA-256 keeps hooks observational while replacing the prior
+    // short custom hash with a standard collision-resistant commitment.
+    function causalFingerprint(value) {
+        const bytes = causalUtf8Bytes(causalNativeString(value));
+        const bitLength = bytes.length * 8;
+        const paddedLength = causalApply(
+            causalMathCeil, Math, [(bytes.length + 9) / 64]
+        ) * 64;
+        const padded = new causalNativeUint8Array(paddedLength);
+        causalApply(causalUint8ArraySet, padded, [bytes]);
+        padded[bytes.length] = 0x80;
+        const highLength = causalApply(
+            causalMathFloor, Math, [bitLength / 0x100000000]
+        );
+        const lowLength = bitLength >>> 0;
+        for (let index = 0; index < 4; index++) {
+            padded[paddedLength - 8 + index] = (highLength >>> (24 - index * 8)) & 0xff;
+            padded[paddedLength - 4 + index] = (lowLength >>> (24 - index * 8)) & 0xff;
+        }
+        const state = [
+            0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+            0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+        ];
+        const words = new causalNativeUint32Array(64);
+        for (let offset = 0; offset < padded.length; offset += 64) {
+            for (let index = 0; index < 16; index++) {
+                const base = offset + index * 4;
+                words[index] = (
+                    (padded[base] << 24)
+                    | (padded[base + 1] << 16)
+                    | (padded[base + 2] << 8)
+                    | padded[base + 3]
+                ) >>> 0;
+            }
+            for (let index = 16; index < 64; index++) {
+                const prior = words[index - 15];
+                const recent = words[index - 2];
+                const sigma0 = causalRotateRight(prior, 7) ^ causalRotateRight(prior, 18) ^ (prior >>> 3);
+                const sigma1 = causalRotateRight(recent, 17) ^ causalRotateRight(recent, 19) ^ (recent >>> 10);
+                words[index] = (words[index - 16] + sigma0 + words[index - 7] + sigma1) >>> 0;
+            }
+            let a = state[0];
+            let b = state[1];
+            let c = state[2];
+            let d = state[3];
+            let e = state[4];
+            let f = state[5];
+            let g = state[6];
+            let h = state[7];
+            for (let index = 0; index < 64; index++) {
+                const sum1 = causalRotateRight(e, 6) ^ causalRotateRight(e, 11) ^ causalRotateRight(e, 25);
+                const choose = (e & f) ^ (~e & g);
+                const temporary1 = (h + sum1 + choose + causalSha256Constants[index] + words[index]) >>> 0;
+                const sum0 = causalRotateRight(a, 2) ^ causalRotateRight(a, 13) ^ causalRotateRight(a, 22);
+                const majority = (a & b) ^ (a & c) ^ (b & c);
+                const temporary2 = (sum0 + majority) >>> 0;
+                h = g;
+                g = f;
+                f = e;
+                e = (d + temporary1) >>> 0;
+                d = c;
+                c = b;
+                b = a;
+                a = (temporary1 + temporary2) >>> 0;
+            }
+            state[0] = (state[0] + a) >>> 0;
+            state[1] = (state[1] + b) >>> 0;
+            state[2] = (state[2] + c) >>> 0;
+            state[3] = (state[3] + d) >>> 0;
+            state[4] = (state[4] + e) >>> 0;
+            state[5] = (state[5] + f) >>> 0;
+            state[6] = (state[6] + g) >>> 0;
+            state[7] = (state[7] + h) >>> 0;
+        }
+        let digest = '';
+        for (let index = 0; index < state.length; index++) {
+            let part = causalApply(causalNumberToString, state[index] >>> 0, [16]);
+            while (part.length < 8) part = '0' + part;
+            digest += part;
+        }
+        return digest;
+    }
+
+    function causalObservationMaterial(value) {
+        if (value === null) return 'null:';
+        if (value === undefined) return 'undefined:';
+        const valueType = typeof value;
+        if (valueType === 'number') {
+            if (causalNumberIsNaN(value)) return 'number:NaN';
+            if (causalObjectIs(value, -0)) return 'number:-0';
+            if (value === Infinity) return 'number:+Infinity';
+            if (value === -Infinity) return 'number:-Infinity';
+        }
+        try {
+            return valueType + ':' + causalNativeString(value);
+        } catch (err) {
+            return valueType + ':<unprintable>';
+        }
+    }
+
+    function causalSanitizeLocation(value) {
+        const raw = causalStringCall(
+            causalStringTrim, causalNativeString(value || ''), []
+        );
+        if (!raw) return 'unknown';
+        if (causalRegExpMatches(/^blob:/i, raw)) return 'blob:';
+        try {
+            if (causalNativeURL && causalRegExpMatches(/^(?:https?|file):/i, raw)) {
+                const parsed = new causalNativeURL(raw, location.href);
+                parsed.username = '';
+                parsed.password = '';
+                parsed.search = '';
+                parsed.hash = '';
+                return (parsed.origin === 'null' ? parsed.protocol : parsed.origin) + parsed.pathname;
+            }
+        } catch (err) {}
+        if (causalRegExpMatches(/^(?:data|javascript):/i, raw)) {
+            const scheme = causalStringCall(causalStringSplit, raw, [':', 1])[0];
+            return causalStringCall(causalStringToLowerCase, scheme, []) + ':';
+        }
+        const withoutHash = causalStringCall(causalStringSplit, raw, ['#', 1])[0];
+        const withoutQuery = causalStringCall(
+            causalStringSplit, withoutHash, ['?', 1]
+        )[0];
+        return causalStringCall(causalStringSlice, withoutQuery, [-512]) || 'unknown';
+    }
+
+    function causalStackLocation(errorStack) {
+        if (!errorStack || typeof errorStack !== 'string') {
+            return { filename: 'unknown', line: 0, column: 0 };
+        }
+        const lines = causalStringCall(causalStringSplit, errorStack, ['\n']);
+        for (let index = 1; index < lines.length; index++) {
+            const traceLine = lines[index] || '';
+            if (
+                causalIndexOf(traceLine, 'oracle_inject.js') !== -1
+                || causalIndexOf(traceLine, '__XSS__') !== -1
+            ) {
+                continue;
+            }
+            // Greedy location capture intentionally anchors the final numeric
+            // line/column pair, so schemes and Windows drive letters are safe.
+            const match = causalStringCall(
+                causalStringMatch,
+                traceLine,
+                [/^(.*):(\d+):(\d+)\)?\s*$/]
+            );
+            if (!match) continue;
+            let filename = causalStringCall(causalStringTrim, match[1], []);
+            const openParen = causalStringCall(
+                causalStringLastIndexOf, filename, ['(']
+            );
+            if (openParen !== -1) {
+                filename = causalStringCall(
+                    causalStringSubstring, filename, [openParen + 1]
+                );
+            }
+            const atSign = causalStringCall(causalStringLastIndexOf, filename, ['@']);
+            if (atSign !== -1) {
+                filename = causalStringCall(
+                    causalStringSubstring, filename, [atSign + 1]
+                );
+            }
+            filename = causalStringCall(
+                causalStringTrim,
+                causalStringCall(causalStringReplace, filename, [/^at\s+/, '']),
+                []
+            );
+            return {
+                filename: filename || 'unknown',
+                line: causalApply(causalMathMax, Math, [
+                    0, causalNativeParseInt(match[2], 10) || 0
+                ]),
+                column: causalApply(causalMathMax, Math, [
+                    0, causalNativeParseInt(match[3], 10) || 0
+                ])
+            };
+        }
+        return { filename: 'unknown', line: 0, column: 0 };
+    }
+
+    function causalStackFingerprint(errorStack, category) {
+        const locationInfo = causalStackLocation(errorStack);
+        return causalFingerprint(
+            causalNativeString(category || '') + '|'
+            + causalSanitizeLocation(locationInfo.filename) + '|'
+            + locationInfo.line + '|' + locationInfo.column
+        );
+    }
+
+    function causalSafeSource(sourceName) {
+        const normalized = causalNativeString(sourceName || '');
+        return causalApply(causalSetHas, causalAllowedSources, [normalized])
+            ? normalized
+            : 'other';
+    }
+
+    function causalSourceCategory(sourceName) {
+        const categories = {
+            'location.href': 'location_href',
+            'location.search': 'location_search',
+            'location.hash': 'location_hash',
+            'location.pathname': 'navigation_state',
+            'document.URL': 'document_url',
+            'document.documentURI': 'document_uri',
+            'document.URLUnencoded': 'document_url',
+            'document.baseURI': 'url',
+            'document.referrer': 'referrer',
+            'window.name': 'window_name',
+            'postMessage': 'postmessage'
+        };
+        return categories[sourceName] || 'url';
+    }
+
+    function causalSafeSink(sinkType) {
+        let normalized = causalNativeString(sinkType || 'other');
+        if (token && causalIncludesToken(normalized)) {
+            const pieces = causalStringCall(causalStringSplit, normalized, [token]);
+            normalized = '';
+            for (let index = 0; index < pieces.length; index++) {
+                if (index) normalized += 'marker';
+                normalized += pieces[index];
+            }
+        }
+        normalized = causalStringCall(causalStringSplit, normalized, [' (Source:', 1])[0];
+        const lowered = causalStringCall(causalStringToLowerCase, normalized, []);
+        if (causalIndexOf(lowered, 'insertadjacenthtml') !== -1) return 'insertadjacenthtml';
+        if (causalIndexOf(lowered, 'innerhtml') !== -1) return 'innerhtml';
+        if (causalIndexOf(lowered, 'outerhtml') !== -1) return 'outerhtml';
+        if (causalIndexOf(lowered, 'document.write') !== -1) return 'document_write';
+        if (causalIndexOf(lowered, 'createcontextualfragment') !== -1) return 'range_fragment';
+        if (causalIndexOf(lowered, 'jquery.html') !== -1 || causalIndexOf(lowered, 'jquery.append') !== -1) return 'jquery_html';
+        if (causalIndexOf(lowered, 'jquery') !== -1 && causalIndexOf(lowered, 'selector') !== -1) return 'jquery_selector';
+        if (causalIndexOf(lowered, 'srcdoc') !== -1) return 'srcdoc';
+        if (causalIndexOf(lowered, 'iframe.src') !== -1) return 'iframe_src';
+        if (causalIndexOf(lowered, 'script.src') !== -1 || causalIndexOf(lowered, 'createscripturl') !== -1) return 'script_src';
+        if (causalIndexOf(lowered, 'script.text') !== -1 || causalIndexOf(lowered, 'createscript') !== -1) return 'script_text';
+        if (lowered === 'eval') return 'eval';
+        if (lowered === 'function' || causalIndexOf(lowered, 'functionconstructor') !== -1) return 'function_ctor';
+        if (lowered === 'settimeout' || lowered === 'setinterval' || causalIndexOf(lowered, 'stringeval') !== -1) return 'timer_string';
+        if (causalIndexOf(lowered, 'setattribute') !== -1) {
+            return causalIndexOf(lowered, 'href') !== -1 ? 'set_href_attr' : 'setattribute';
+        }
+        if (causalIndexOf(lowered, 'location.assign') !== -1) return 'location_assign';
+        if (causalIndexOf(lowered, 'location.replace') !== -1) return 'location_replace';
+        if (causalIndexOf(lowered, 'location.href') !== -1) return 'location_href';
+        if (causalIndexOf(lowered, 'location') !== -1 || causalIndexOf(lowered, 'history.') !== -1 || causalIndexOf(lowered, 'navigation.') !== -1) return 'navigation';
+        if (causalIndexOf(lowered, 'window.open') !== -1) return 'window_open';
+        if (causalIndexOf(lowered, 'postmessage') !== -1) return 'postmessage';
+        if (causalIndexOf(lowered, 'css') !== -1 || causalIndexOf(lowered, 'style') !== -1) return 'style';
+        if (causalIndexOf(lowered, 'attr') !== -1) return 'attribute';
+        return null;
+    }
+
+    function causalContextAlive(context, now) {
+        return !!context && context.depth <= CAUSAL_MAX_DEPTH && now <= context.expiresAt;
+    }
+
+    function causalCurrentContext() {
+        const now = causalNow();
+        if (causalContextAlive(causalState.activeContext, now)) {
+            return causalState.activeContext;
+        }
+        if (causalContextAlive(causalState.syncContext, now)) {
+            return causalState.syncContext;
+        }
+        return null;
+    }
+
+    function causalPush(event) {
+        if (causalState.events.length >= CAUSAL_MAX_EVENTS) {
+            causalState.droppedEvents++;
+            return;
+        }
+        causalAppend(causalState.events, event);
+    }
+
+    function causalScheduleSyncClear() {
+        if (causalState.syncClearPending) return;
+        causalState.syncClearPending = true;
+        const clear = function() {
+            causalState.syncClearPending = false;
+            causalState.syncContext = null;
+        };
+        try {
+            if (causalNativeQueueMicrotask) {
+                causalNativeQueueMicrotask(clear);
+            } else if (causalNativePromiseThen) {
+                causalNativePromiseThen.call(Promise.resolve(), clear);
+            } else {
+                setTimeout(clear, 0);
+            }
+        } catch (err) {
+            causalState.syncClearPending = false;
+            causalState.syncContext = null;
+        }
+    }
+
+    function recordCausalSource(sourceName, errorStack, observationKind) {
+        const now = causalNow();
+        const source = causalSafeSource(sourceName);
+        let context = causalCurrentContext();
+        if (!context) {
+            context = {
+                contextId: 'ctx-' + causalState.nextContextId++,
+                parentContextId: null,
+                createdAt: now,
+                expiresAt: now + CAUSAL_TTL_MS,
+                depth: 0,
+                relation: 'direct'
+            };
+            causalState.syncContext = context;
+            causalScheduleSyncClear();
+        }
+        const eventId = 'src-' + causalState.nextEventId++;
+        const stackFingerprint = causalStackFingerprint(errorStack, source);
+        causalPush({
+            kind: 'source',
+            event_id: eventId,
+            source_id: eventId,
+            context_id: context.contextId,
+            parent_context_id: context.parentContextId,
+            ts_ms: now,
+            relation: context.relation,
+            depth: context.depth,
+            source: source,
+            source_category: causalSourceCategory(source),
+            source_observation: ['getter_read', 'listener_delivery', 'ambient_match'].indexOf(observationKind) !== -1
+                ? observationKind
+                : 'getter_read',
+            fingerprint: stackFingerprint,
+            source_fingerprint: stackFingerprint,
+            stack_fingerprint: stackFingerprint
+        });
+        return context;
+    }
+
+    function captureCausalContext() {
+        const context = causalCurrentContext();
+        if (!context || context.depth >= CAUSAL_MAX_DEPTH) return null;
+        return {
+            // Retaining the root context id lets the reducer match a source to a
+            // sink without exporting every intermediate callback as an event.
+            contextId: context.contextId,
+            parentContextId: context.parentContextId,
+            createdAt: context.createdAt,
+            expiresAt: context.expiresAt,
+            depth: context.depth + 1,
+            relation: 'async'
+        };
+    }
+
+    function runWithCausalContext(context, callback, receiver, args) {
+        if (!causalContextAlive(context, causalNow())) {
+            return callback.apply(receiver, args);
+        }
+        const previous = causalState.activeContext;
+        causalState.activeContext = context;
+        try {
+            return callback.apply(receiver, args);
+        } finally {
+            causalState.activeContext = previous;
+        }
+    }
+
+    function wrapCausalCallback(callback, context) {
+        if (typeof callback !== 'function' || !context) return callback;
+        return function() {
+            return runWithCausalContext(context, callback, this, arguments);
+        };
+    }
+
+    function causalAmbientSource(value) {
+        if (!causalIncludesToken(value)) return null;
+        const candidates = [
+            ['location.hash', function() { return location.hash; }],
+            ['location.search', function() { return location.search; }],
+            ['location.pathname', function() { return location.pathname; }],
+            ['location.href', function() { return location.href; }],
+            ['document.referrer', function() { return document.referrer; }],
+            ['document.URL', function() { return document.URL; }],
+            ['document.documentURI', function() { return document.documentURI; }],
+            ['window.name', function() { return window.name; }]
+        ];
+        for (let index = 0; index < candidates.length; index++) {
+            try {
+                const candidateValue = candidates[index][1]();
+                if (causalIncludesToken(candidateValue)) {
+                    return candidates[index][0];
+                }
+            } catch (err) {}
+        }
+        return null;
+    }
+
+    function recordCausalSink(sinkType, classification, value, filename, line, column, errorStack) {
+        let context = causalCurrentContext();
+        if (!context) {
+            const ambientSource = causalAmbientSource(value);
+            // A few browser sources, most notably Location's unforgeable own
+            // accessors in Chromium, cannot be wrapped. Matching the inert
+            // marker at a sink records a weak causal candidate without altering
+            // the source value; only A/A/B may later establish value influence.
+            if (!causalCurrentContext() && ambientSource) {
+                recordCausalSource(ambientSource, errorStack, 'ambient_match');
+            }
+            context = causalCurrentContext();
+        }
+        const now = causalNow();
+        if (!causalContextAlive(context, now)) return;
+        const sink = causalSafeSink(sinkType);
+        if (!sink) return;
+        const eventId = 'sink-' + causalState.nextEventId++;
+        const siteMaterial = sink + '|' + causalSanitizeLocation(filename) + '|' + Number(line || 0) + '|' + Number(column || 0);
+        const sinkFingerprint = causalFingerprint(siteMaterial);
+        causalPush({
+            kind: 'sink',
+            event_id: eventId,
+            sink_id: eventId,
+            context_id: context.contextId,
+            parent_context_id: context.parentContextId,
+            ts_ms: now,
+            relation: context.relation,
+            depth: context.depth,
+            sink: sink,
+            sink_category: sink,
+            fingerprint: sinkFingerprint,
+            sink_fingerprint: sinkFingerprint,
+            stack_fingerprint: causalStackFingerprint(errorStack, sink),
+            observation_fingerprint: causalFingerprint(causalObservationMaterial(value)),
+            browser_classification: ['source', 'taint', 'execution'].indexOf(classification) !== -1
+                ? classification
+                : 'taint'
+        });
+    }
+
+    function causalExportEvent(event) {
+        if (!event || event.kind === 'source') {
+            if (!event || event.kind !== 'source') return null;
+            return causalSuppressToJSON({
+                kind: event.kind,
+                event_id: event.event_id,
+                source_id: event.source_id,
+                context_id: event.context_id,
+                parent_context_id: event.parent_context_id,
+                ts_ms: event.ts_ms,
+                relation: event.relation,
+                depth: event.depth,
+                source: event.source,
+                source_category: event.source_category,
+                source_observation: event.source_observation,
+                fingerprint: event.fingerprint,
+                source_fingerprint: event.source_fingerprint,
+                stack_fingerprint: event.stack_fingerprint
+            });
+        }
+        if (event.kind !== 'sink') return null;
+        return causalSuppressToJSON({
+            kind: event.kind,
+            event_id: event.event_id,
+            sink_id: event.sink_id,
+            context_id: event.context_id,
+            parent_context_id: event.parent_context_id,
+            ts_ms: event.ts_ms,
+            relation: event.relation,
+            depth: event.depth,
+            sink: event.sink,
+            sink_category: event.sink_category,
+            fingerprint: event.fingerprint,
+            sink_fingerprint: event.sink_fingerprint,
+            stack_fingerprint: event.stack_fingerprint,
+            observation_fingerprint: event.observation_fingerprint,
+            browser_classification: event.browser_classification
+        });
+    }
+
+    function causalExportLedger() {
+        const exportedEvents = causalSuppressToJSON([]);
+        const limit = causalApply(causalMathFloor, Math, [
+            causalState.events.length < CAUSAL_MAX_EVENTS
+                ? causalState.events.length
+                : CAUSAL_MAX_EVENTS
+        ]);
+        for (let index = 0; index < limit; index++) {
+            const event = causalExportEvent(causalState.events[index]);
+            if (event) causalAppend(exportedEvents, event);
+        }
+        const limits = causalSuppressToJSON({
+            max_events: CAUSAL_MAX_EVENTS,
+            max_depth: CAUSAL_MAX_DEPTH,
+            ttl_ms: CAUSAL_TTL_MS
+        });
+        return causalSuppressToJSON({
+            schema_version: 'runtime-causal-lineage-events/v1',
+            value_free: true,
+            limits: limits,
+            dropped_events: causalState.droppedEvents,
+            events: exportedEvents
+        });
+    }
+
+    causalObjectDefineProperty(window, '__XSS_CAUSAL_LINEAGE__', {
+        value: causalExportLedger,
+        configurable: false,
+        enumerable: false,
+        writable: false
+    });
+    // Cross the automation boundary as a primitive string. Playwright and
+    // WebDriver otherwise serialize the returned arrays through page-controlled
+    // prototypes, so a hostile page can suppress an intact private ledger by
+    // replacing Array.prototype.map/push after initialization.
+    causalObjectDefineProperty(window, '__XSS_CAUSAL_LINEAGE_JSON__', {
+        value: function() {
+            return causalApply(causalJsonStringify, causalJson, [
+                causalExportLedger()
+            ]);
+        },
+        configurable: false,
+        enumerable: false,
+        writable: false
+    });
 
     function resolveDynamicInsertionContext(element) {
         if (!element || !(element instanceof Node)) {
@@ -169,38 +858,16 @@
             value = fullStr;
             sinkType = 'TaggedTemplateLiteral';
         }
-        if (value && typeof value === 'string' && !sinkType.startsWith('DOMSourceRead:')) {
-            for (const [source, marker] of Object.entries(taintMarkers)) {
-                if (value.includes(marker)) {
-                    sinkType = `${sinkType} (Source: ${source})`;
-                    break;
-                }
-            }
-        }
         let filename = 'unknown';
         let line = 0;
         let column = 0;
 
-        // Parse stack trace to find the origin of the execution
-        if (errorStack && typeof errorStack === 'string') {
-            const lines = errorStack.split('\n');
-            // Look for the first line in the stack trace that isn't the oracle script itself
-            for (let i = 1; i < lines.length; i++) {
-                const traceLine = lines[i];
-                if (traceLine && !traceLine.includes('oracle_inject.js') && !traceLine.includes('__XSS__')) {
-                    // Match pattern: "at functionName (filename:line:col)" or "at filename:line:col"
-                    const match = traceLine.match(/at\s+(?:[^\s(]+)?\s*\(?([^:]+):(\d+):(\d+)\)?/i) || 
-                                  traceLine.match(/at\s+([^:]+):(\d+):(\d+)/i) ||
-                                  traceLine.match(/@([^:]+):(\d+):(\d+)/i); // Firefox support
-                    if (match) {
-                        filename = match[1].trim();
-                        line = parseInt(match[2], 10);
-                        column = parseInt(match[3], 10);
-                        break;
-                    }
-                }
-            }
-        }
+        // Parse from the final numeric line/column pair so URL schemes and
+        // Windows paths do not collapse to an unknown location.
+        const stackLocation = causalStackLocation(errorStack);
+        filename = stackLocation.filename;
+        line = stackLocation.line;
+        column = stackLocation.column;
 
         const sinkInfo = {
             sink: sinkType,
@@ -211,16 +878,36 @@
             stack: errorStack || ''
         };
 
-        // Classify once, and use it for BOTH the HTTP callback and the console log so
-        // the two confirmation paths can never disagree. Only 'execution' is a hit.
         const classification = classifyExecution(sinkType, value, token);
-
+        if (classification !== 'source') {
+            recordCausalSink(
+                sinkType,
+                classification,
+                value,
+                filename,
+                line,
+                column,
+                errorStack
+            );
+        }
+        // Controlled lineage arms use an unregistered inert marker. Their only
+        // output is the in-memory bounded ledger; never emit oracle network or
+        // console-hit signals for these prioritization observations.
+        if (lineageProbe) return;
         const serializedData = encodeURIComponent(JSON.stringify(sinkInfo));
         const url = `${oracleUrl}?token=${encodeURIComponent(token)}&msg=${encodeURIComponent('SINK HIT: ' + sinkType)}&sink=${encodeURIComponent(sinkType)}&kind=${encodeURIComponent(classification)}&data=${serializedData}`;
-        
-        // Multi-Channel Telemetry Exfiltration (bypasses CSP and Sandbox isolation)
+
+        const isHttpsPage = typeof location !== 'undefined' && location.protocol === 'https:';
+        const isHttpOracle = oracleUrl.startsWith('http://');
+
         const transmitMethods = [
-            // Channel 1: Native Fetch API
+            () => {
+                if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+                    navigator.sendBeacon(url);
+                    return true;
+                }
+                throw new Error();
+            },
             () => {
                 if (typeof fetch !== 'undefined') {
                     fetch(url, { method: 'GET', mode: 'no-cors', credentials: 'omit' }).catch(() => {});
@@ -228,7 +915,6 @@
                 }
                 throw new Error();
             },
-            // Channel 2: XMLHTTPRequest
             () => {
                 if (typeof XMLHttpRequest !== 'undefined') {
                     const xhr = new XMLHttpRequest();
@@ -238,54 +924,22 @@
                 }
                 throw new Error();
             },
-            // Channel 3: DOM Image element
             () => {
-                const img = new Image();
-                img.src = url;
-                return true;
-            },
-            // Channel 4: DNS Prefetching (bypasses strict connect-src directives)
-            () => {
-                if (typeof document !== 'undefined' && document.head) {
-                    const link = document.createElement('link');
-                    link.rel = 'dns-prefetch';
-                    link.href = `//dns-${token}.oracle.local/`;
-                    document.head.appendChild(link);
-                    return true;
-                }
-                throw new Error();
-            },
-            // Channel 5: Dynamic link preconnect
-            () => {
-                if (typeof document !== 'undefined' && document.head) {
-                    const link = document.createElement('link');
-                    link.rel = 'preconnect';
-                    link.href = `//conn-${token}.oracle.local/`;
-                    document.head.appendChild(link);
-                    return true;
-                }
-                throw new Error();
-            },
-            // Channel 6: HTML5 Audio tag source request
-            () => {
-                if (typeof document !== 'undefined' && document.createElement) {
-                    const audio = document.createElement('audio');
-                    const source = document.createElement('source');
-                    source.src = url;
-                    audio.appendChild(source);
+                if (!isHttpsPage || !isHttpOracle) {
+                    const img = new Image();
+                    img.src = url;
                     return true;
                 }
                 throw new Error();
             }
         ];
 
-        // Execute all exfiltration methods sequentially to maximize delivery probability
         transmitMethods.forEach(method => {
             try {
                 method();
             } catch (e) {}
         });
-        
+
         if (sinkType.startsWith('DOMSourceRead:') || sinkType === 'postMessage.source') {
             console.log('XSS Oracle: Source read detected', { token: token, sinkInfo: sinkInfo });
         } else {
@@ -316,6 +970,89 @@
         window.__registerOracleHook__(Function.prototype.toString, originalToString, 'toString');
     } catch (err) {
         console.error('XSS Oracle: Failed to setup toString spoofing', err);
+    }
+
+    // Preserve causal context through common callback boundaries. Context is
+    // short-lived, capped, and only labels co-occurrence; it never upgrades a
+    // sink to confirmed execution.
+    try {
+        const originalThen = Promise.prototype.then;
+        Promise.prototype.then = function(onFulfilled, onRejected) {
+            const context = captureCausalContext();
+            return originalThen.call(
+                this,
+                wrapCausalCallback(onFulfilled, context),
+                wrapCausalCallback(onRejected, context)
+            );
+        };
+        window.__registerOracleHook__(Promise.prototype.then, originalThen, 'then');
+
+        if (Promise.prototype.catch) {
+            const originalCatch = Promise.prototype.catch;
+            Promise.prototype.catch = function(onRejected) {
+                const context = captureCausalContext();
+                return originalCatch.call(this, wrapCausalCallback(onRejected, context));
+            };
+            window.__registerOracleHook__(Promise.prototype.catch, originalCatch, 'catch');
+        }
+
+        if (Promise.prototype.finally) {
+            const originalFinally = Promise.prototype.finally;
+            Promise.prototype.finally = function(onFinally) {
+                const context = captureCausalContext();
+                return originalFinally.call(this, wrapCausalCallback(onFinally, context));
+            };
+            window.__registerOracleHook__(Promise.prototype.finally, originalFinally, 'finally');
+        }
+    } catch (err) {
+        console.error('XSS Oracle: Failed to setup Promise causal propagation', err);
+    }
+
+    try {
+        const originalSetTimeout = window.setTimeout;
+        window.setTimeout = function(callback, delay) {
+            const context = captureCausalContext();
+            const args = Array.prototype.slice.call(arguments, 2);
+            return originalSetTimeout.apply(this, [wrapCausalCallback(callback, context), delay].concat(args));
+        };
+        window.__registerOracleHook__(window.setTimeout, originalSetTimeout, 'setTimeout');
+
+        const originalSetInterval = window.setInterval;
+        window.setInterval = function(callback, delay) {
+            const context = captureCausalContext();
+            const args = Array.prototype.slice.call(arguments, 2);
+            return originalSetInterval.apply(this, [wrapCausalCallback(callback, context), delay].concat(args));
+        };
+        window.__registerOracleHook__(window.setInterval, originalSetInterval, 'setInterval');
+
+        if (typeof window.queueMicrotask === 'function') {
+            const originalQueueMicrotask = window.queueMicrotask;
+            window.queueMicrotask = function(callback) {
+                const context = captureCausalContext();
+                return originalQueueMicrotask.call(this, wrapCausalCallback(callback, context));
+            };
+            window.__registerOracleHook__(window.queueMicrotask, originalQueueMicrotask, 'queueMicrotask');
+        }
+
+        if (typeof window.requestAnimationFrame === 'function') {
+            const originalRequestAnimationFrame = window.requestAnimationFrame;
+            window.requestAnimationFrame = function(callback) {
+                const context = captureCausalContext();
+                return originalRequestAnimationFrame.call(this, wrapCausalCallback(callback, context));
+            };
+            window.__registerOracleHook__(window.requestAnimationFrame, originalRequestAnimationFrame, 'requestAnimationFrame');
+        }
+
+        if (typeof window.requestIdleCallback === 'function') {
+            const originalRequestIdleCallback = window.requestIdleCallback;
+            window.requestIdleCallback = function(callback, options) {
+                const context = captureCausalContext();
+                return originalRequestIdleCallback.call(this, wrapCausalCallback(callback, context), options);
+            };
+            window.__registerOracleHook__(window.requestIdleCallback, originalRequestIdleCallback, 'requestIdleCallback');
+        }
+    } catch (err) {
+        console.error('XSS Oracle: Failed to setup callback causal propagation', err);
     }
 
     // Observe explicit Object.defineProperty calls without predefining common
@@ -508,13 +1245,11 @@
             
             Object.defineProperty(object, propertyName, {
                 get: function() {
-                    let val = descriptor.get.call(this);
+                    const val = descriptor.get.call(this);
                     if (val && typeof val === 'string' && val.includes(token)) {
-                        const marker = taintMarkers[sourceName];
-                        if (marker && !val.includes(marker)) {
-                            val = val + marker;
-                        }
-                        __XSS__('DOMSourceRead:' + sourceName, val, new Error().stack);
+                        const stack = new Error().stack;
+                        recordCausalSource(sourceName, stack, 'getter_read');
+                        __XSS__('DOMSourceRead:' + sourceName, val, stack);
                     }
                     return val;
                 },
@@ -522,7 +1257,7 @@
                     return descriptor.set.call(this, newVal);
                 } : undefined,
                 configurable: true,
-                enumerable: true
+                enumerable: descriptor.enumerable
             });
         } catch (e) {}
     };
@@ -563,22 +1298,19 @@
     function messageEventForListener(event) {
         const fakeOrigin = window.__XSS_FAKE_MESSAGE_ORIGIN__;
         if (!event) return event;
+        if (!fakeOrigin) return event;
 
         try {
             return new Proxy(event, {
-                get: function(target, prop, receiver) {
+                get: function(target, prop) {
                     if (prop === 'origin' && fakeOrigin) return fakeOrigin;
                     if (prop === 'data') {
-                        let val = Reflect.get(target, prop, receiver);
-                        if (val && typeof val === 'string' && val.includes(token)) {
-                            const marker = '__taint_postmsg__';
-                            if (!val.includes(marker)) {
-                                val = val + marker;
-                            }
-                        }
-                        return val;
+                        // MessageEvent accessors require the real event as their
+                        // receiver. A Proxy receiver throws "Illegal invocation"
+                        // and prevents the application listener from running.
+                        return Reflect.get(target, prop, target);
                     }
-                    const value = Reflect.get(target, prop, receiver);
+                    const value = Reflect.get(target, prop, target);
                     return typeof value === 'function' ? value.bind(target) : value;
                 }
             });
@@ -603,7 +1335,9 @@
     function recordMessageSource(deliveredEvent) {
         const data = serializedMessageData(deliveredEvent && deliveredEvent.data);
         if (typeof data === 'string' && data.includes(token)) {
-            __XSS__('postMessage.source', data, new Error().stack);
+            const stack = new Error().stack;
+            recordCausalSource('postMessage', stack, 'listener_delivery');
+            __XSS__('postMessage.source', data, stack);
         }
     }
 
@@ -2902,21 +3636,8 @@
         console.error('XSS Oracle: Failed to setup URL/URLSearchParams hooks', err);
     }
 
-    // Hook 46: attachShadow Closed Shadow-DOM-Aware Auditing Bypass
-    try {
-        if (window.Element && Element.prototype.attachShadow) {
-            const originalAttachShadow = Element.prototype.attachShadow;
-            Element.prototype.attachShadow = function(init) {
-                // If closed mode is requested, force it to 'open' to allow DOM interaction traversal
-                if (init && init.mode === 'closed') {
-                    return originalAttachShadow.call(this, { ...init, mode: 'open' });
-                }
-                return originalAttachShadow.call(this, init);
-            };
-        }
-    } catch (err) {
-        console.error('XSS Oracle: Failed to setup attachShadow override', err);
-    }
+    // Closed shadow roots keep native semantics. The browser-native DOMSnapshot
+    // differential observes their flattened structure without changing mode.
 
     // Hook 47: CSS/XS-Leaks Style Rule Injection Auditing
     try {
@@ -2980,3 +3701,4 @@
 
     console.log('XSS Oracle: Injected successfully', { token: token.substring(0, 8) + '...' });
 })();
+//# sourceURL=xssboss_oracle_inject.js

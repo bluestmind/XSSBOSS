@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 from fastapi.responses import PlainTextResponse
 from fastapi.exceptions import RequestValidationError
 from backend_api.config import settings
-from backend_api.routers import artifacts, contexts, endpoints, experiments, filters, modern, oracle, params, program_import, research, results, scans, sinks, targets, test_cases, verification, burp
+from backend_api.routers import artifacts, contexts, endpoints, experiments, filters, modern, oracle, params, program_import, research, results, scans, sinks, targets, test_cases, verification, burp, proxy, hackerone, programs, logs
 from backend_api.db.base import init_db
 from backend_api.utils.logger import logger, setup_logging
 from backend_api.utils.errors import XSSBossException
@@ -32,8 +32,20 @@ _route_duration_buckets: dict[tuple[str, float], int] = {}
 setup_logging()
 
 
+_KNOWN_ROUTE_GROUPS = frozenset({
+    "artifacts", "contexts", "endpoints", "experiments", "filters", "modern",
+    "oracle", "params", "programs", "research", "results", "scans", "sinks",
+    "targets", "test-cases", "verification", "burp", "proxy", "hackerone", "logs",
+})
+
+
 def _route_group(path: str) -> str:
-    return path.split("/")[3] if path.startswith("/api/v1/") else "system"
+    """Use a bounded metric label set, never request-controlled path segments."""
+    if not path.startswith("/api/v1/"):
+        return "system"
+    parts = path.split("/")
+    candidate = parts[3] if len(parts) > 3 else ""
+    return candidate if candidate in _KNOWN_ROUTE_GROUPS else "unmatched"
 
 
 def _record_request_metric(path: str, status_code: int, duration: float) -> None:
@@ -111,6 +123,22 @@ async def lifespan(app: FastAPI):
         finally:
             provisioning_db.close()
         logger.info("Database initialized successfully")
+
+        # Start Dynamic Upstream Proxy Server for Burp Suite & External Tools
+        if getattr(settings, "UPSTREAM_ROTATING_PROXY_ENABLED", True):
+            try:
+                from backend_api.services.rotating_upstream_proxy import get_rotating_upstream_proxy_server
+                get_rotating_upstream_proxy_server().start()
+            except Exception as e:
+                logger.warning(f"Could not start Upstream Rotating Proxy: {e}")
+
+        # Start Automatic Proxy Freshness Harvester Daemon
+        if getattr(settings, "PROXY_ENABLED", True):
+            try:
+                from backend_api.services.proxy_harvester_service import get_proxy_harvester_service
+                get_proxy_harvester_service().start()
+            except Exception as e:
+                logger.warning(f"Could not start Proxy Harvester: {e}")
     except Exception as e:
         logger.error(f"Failed to initialize database: {e}", exc_info=True)
         raise
@@ -118,6 +146,19 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("Shutting down XSS Boss API...")
+    if getattr(settings, "PROXY_ENABLED", True):
+        try:
+            from backend_api.services.proxy_harvester_service import get_proxy_harvester_service
+            get_proxy_harvester_service().stop()
+        except Exception:
+            pass
+
+    if getattr(settings, "UPSTREAM_ROTATING_PROXY_ENABLED", True):
+        try:
+            from backend_api.services.rotating_upstream_proxy import get_rotating_upstream_proxy_server
+            get_rotating_upstream_proxy_server().stop()
+        except Exception:
+            pass
 
 
 app = FastAPI(
@@ -208,10 +249,10 @@ async def security_and_observability(request: Request, call_next):
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[origin.strip() for origin in settings.ALLOWED_ORIGINS if origin.strip()],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
 )
 
 if settings.ENVIRONMENT.lower() != "production":
@@ -273,6 +314,10 @@ app.include_router(results.router, prefix=settings.API_PREFIX)
 app.include_router(oracle.router, prefix=settings.API_PREFIX)
 app.include_router(scans.router, prefix=settings.API_PREFIX)
 app.include_router(burp.router, prefix=settings.API_PREFIX)
+app.include_router(proxy.router, prefix=settings.API_PREFIX)
+app.include_router(hackerone.router, prefix=settings.API_PREFIX)
+app.include_router(programs.router, prefix=settings.API_PREFIX)
+app.include_router(logs.router)
 
 @app.get("/")
 def root():

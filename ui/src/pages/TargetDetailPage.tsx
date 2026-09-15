@@ -10,6 +10,8 @@ import ExperimentTable from '@/components/tables/ExperimentTable';
 import FindingTable from '@/components/tables/FindingTable';
 import StatCard from '@/components/cards/StatCard';
 import BurpIntegration from '@/components/burp/BurpIntegration';
+import SecurityProfileTable from '@/components/tables/SecurityProfileTable';
+import { programsApi } from '@/api/programs';
 import { getStatusColor, formatDate } from '@/utils/formatters';
 
 const TargetDetailPage = () => {
@@ -19,6 +21,12 @@ const TargetDetailPage = () => {
   const { data: target, isLoading: targetLoading } = useQuery({
     queryKey: ['targets', targetId],
     queryFn: () => targetsApi.get(targetId),
+    enabled: !!targetId,
+  });
+
+  const { data: programProfile } = useQuery({
+    queryKey: ['program', targetId],
+    queryFn: () => programsApi.profile(targetId),
     enabled: !!targetId,
   });
 
@@ -100,6 +108,15 @@ const TargetDetailPage = () => {
         targetUrl={target.base_url}
         onImportComplete={refetchEndpoints}
       />
+
+      {/* Defense & Security Telemetry Profile */}
+      <div className="mb-8">
+        <h2 className="text-xl font-semibold text-carbon-100 mb-3 flex items-center gap-2">
+          <span>🛡️ Defense & Security Telemetry Profile</span>
+          <span className="text-xs font-normal text-carbon-400">(WAF, CSP, DOM Sinks, Character Matrix, Tech Stack)</span>
+        </h2>
+        <SecurityProfileTable profile={programProfile?.security_profile} />
+      </div>
 
       {/* Endpoints */}
       <div className="mb-8">

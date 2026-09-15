@@ -175,6 +175,13 @@ class CampaignReportService:
             "status_counts": {}, "top_hypotheses": [],
         }
         target = experiment.target
+        limits = experiment.limits if isinstance(experiment.limits, dict) else {}
+        coverage = limits.get("coverage") if isinstance(limits.get("coverage"), dict) else {}
+        from backend_api.services.auth_session_service import AuthSessionService
+        identity_count = len(AuthSessionService.identity_labels(target.auth_info)) if target.auth_info else 0
+        open_interventions = len([
+            item for item in limits.get("human_interventions", []) if item.get("status") == "open"
+        ])
         started_str = experiment.started_at.strftime("%Y-%m-%d %H:%M:%S") if experiment.started_at else "N/A"
         completed_str = experiment.completed_at.strftime("%Y-%m-%d %H:%M:%S") if experiment.completed_at else "N/A"
         
@@ -191,6 +198,10 @@ class CampaignReportService:
 | **Completed At** | {completed_str} |
 | **Duration** | {duration_str} |
 | **Total Test Cases** | {total_cases} ({completed_cases} completed, {failed_cases} failed) |
+| **Authenticated Identities** | {identity_count} |
+| **Endpoint Coverage** | {coverage.get('endpoint_coverage_percent', 'N/A')}% ({coverage.get('tested_endpoints', 0)}/{coverage.get('eligible_endpoints', 0)}) |
+| **Completion Reason** | {(limits.get('done') or {}).get('reason', 'in progress')} |
+| **Open Human Interventions** | {open_interventions} |
 | **Total Vulnerabilities Found** | **{len(findings)}** |
 
 ### Severity Breakdown
@@ -293,6 +304,13 @@ class CampaignReportService:
             "status_counts": {}, "top_hypotheses": [],
         }
         target = experiment.target
+        limits = experiment.limits if isinstance(experiment.limits, dict) else {}
+        coverage = limits.get("coverage") if isinstance(limits.get("coverage"), dict) else {}
+        from backend_api.services.auth_session_service import AuthSessionService
+        identity_count = len(AuthSessionService.identity_labels(target.auth_info)) if target.auth_info else 0
+        open_interventions = len([
+            item for item in limits.get("human_interventions", []) if item.get("status") == "open"
+        ])
         started_str = experiment.started_at.strftime("%Y-%m-%d %H:%M:%S") if experiment.started_at else "N/A"
         completed_str = experiment.completed_at.strftime("%Y-%m-%d %H:%M:%S") if experiment.completed_at else "N/A"
         
@@ -748,6 +766,22 @@ class CampaignReportService:
                 <div class="info-item">
                     <span class="info-lbl">Status:</span>
                     <span class="info-val" style="color: {var_status_color(experiment.status.value)}; font-weight: 600;">{experiment.status.value.upper()}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-lbl">Authenticated Identities:</span>
+                    <span class="info-val">{identity_count}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-lbl">Endpoint Coverage:</span>
+                    <span class="info-val">{coverage.get('endpoint_coverage_percent', 'N/A')}% ({coverage.get('tested_endpoints', 0)}/{coverage.get('eligible_endpoints', 0)})</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-lbl">Completion Reason:</span>
+                    <span class="info-val">{html.escape(str((limits.get('done') or {}).get('reason', 'in progress')))}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-lbl">Open Interventions:</span>
+                    <span class="info-val">{open_interventions}</span>
                 </div>
             </div>
         </section>

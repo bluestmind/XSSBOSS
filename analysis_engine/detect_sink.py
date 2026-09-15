@@ -10,6 +10,8 @@ from backend_api.utils.sink_mapper import SinkMapper
 from backend_api.utils.js_parser import JSParser
 from backend_api.services.sink_service import SinkService
 from backend_api.utils.logger import logger
+from backend_api.config import settings
+from backend_api.utils.rate_limiter import rate_limited_call
 
 
 class SinkDetectorEngine:
@@ -101,14 +103,26 @@ class SinkDetectorEngine:
                         key, value = cookie_pair.split('=', 1)
                         cookies[key.strip()] = value.strip()
             
+            proxy_kwargs = {}
+            try:
+                from backend_api.utils.stealth import get_http_proxy_kwargs
+                proxy_kwargs = get_http_proxy_kwargs(rotated=True)
+            except Exception:
+                pass
+
             # Send request to get HTML
-            response = httpx.request(
-                method=method,
-                url=url_pattern,
-                headers=headers,
-                cookies=cookies,
-                timeout=timeout,
-                follow_redirects=True
+            response = rate_limited_call(
+                url_pattern,
+                lambda: httpx.request(
+                    method=method,
+                    url=url_pattern,
+                    headers=headers,
+                    cookies=cookies,
+                    timeout=timeout,
+                    follow_redirects=True,
+                    verify=not settings.ALLOW_INSECURE_TLS,
+                    **proxy_kwargs,
+                ),
             )
             
             if response.status_code >= 400:

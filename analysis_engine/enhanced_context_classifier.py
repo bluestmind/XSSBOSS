@@ -52,6 +52,23 @@ class EnhancedContextClassifier:
         if not html_content or not marker or marker not in html_content:
             return []
 
+        # Parse repeated reflections independently in source order. A DOM-wide
+        # "attributes first, text second" traversal otherwise reports a later
+        # attribute before an earlier text reflection and steers the fuzzer at
+        # the wrong breakout grammar.
+        positions = [match.start() for match in re.finditer(re.escape(marker), html_content)]
+        if len(positions) > 1:
+            masked_all = html_content.replace(marker, "_" * len(marker))
+            ordered: List[ClassifiedContext] = []
+            for position in positions:
+                isolated = (
+                    masked_all[:position]
+                    + marker
+                    + masked_all[position + len(marker):]
+                )
+                ordered.extend(EnhancedContextClassifier.classify_all_reflections(isolated, marker))
+            return ordered
+
         results: List[ClassifiedContext] = []
 
         # 1. Check HTML Comments
@@ -73,7 +90,9 @@ class EnhancedContextClassifier:
 
         # 4. Check for Client-Side Template Injection delimiters ({{marker}})
         csti_contexts = EnhancedContextClassifier._detect_csti_reflections(html_content, marker)
-        results.extend(csti_contexts)
+        # Framework/template execution is more specific than the underlying
+        # HTML text/attribute container, so it must be considered first.
+        results = [*csti_contexts, *results]
 
         # Deduplicate results by (context_type, tag, attribute, quote_char)
         seen = set()
@@ -251,8 +270,35 @@ class EnhancedContextClassifier:
                 is_js_executable=True,
             )
 
+        # Vue template directives are executable framework contexts, not
+        # ordinary quoted attributes.
+        if attr_lower in {"v-html", "v-text"} or attr_lower.startswith("v-bind:"):
+            return ClassifiedContext(
+                context_type=ContextType.CSTI_VUE,
+                tag=tag,
+                attribute=attr,
+                quote_char=quote_char,
+                snippet=snippet,
+                breakout_sequence=f"{quote_char}>" if quote_char else " >",
+                is_html_entity_decoded=True,
+                is_js_executable=attr_lower == "v-html",
+                metadata={"directive": attr_lower},
+            )
+
         # 3. URL Attributes (href, src, action, formaction)
-        if attr_lower in URL_ATTRIBUTES:
+        if attr_lower in URL_ATTRIBUTES and "#" in val and val.find("#") < val.find(marker):
+            return ClassifiedContext(
+                context_type=ContextType.URL_FRAGMENT,
+                tag=tag,
+                attribute=attr,
+                quote_char=quote_char,
+                snippet=snippet,
+                breakout_sequence=f"{quote_char}>" if quote_char else " >",
+                is_html_entity_decoded=True,
+                metadata={"supports_javascript_pseudourl": True},
+            )
+
+        if attr_lower in URL_ATTRIBUTES and "?" in val and val.find("?") < val.find(marker):
             return ClassifiedContext(
                 context_type=ContextType.URL_QUERY,
                 tag=tag,
@@ -405,20 +451,43 @@ class EnhancedContextClassifier:
         csti_matches = re.finditer(r'\{\{([^}]*' + re.escape(marker) + r'[^}]*)\}\}', html_content)
         for cm in csti_matches:
             snippet = cm.group(0)
-            # Check for Angular signatures
-            if "ng-app" in html_content or "angular" in html_content.lower():
+            expression = cm.group(1)
+            lower_html = html_content.lower()
+            contains_rendered_markup = "<" in expression or ">" in expression
+            # Require executable framework signatures. A literal {{...}} in a
+            # <pre>, chat message, or Ember-rendered note is only text and must
+            # never be promoted to a JavaScript execution context by itself.
+            angular_signature = bool(
+                re.search(r'\bng-(?:app|controller|bind|init)\b', lower_html)
+                or re.search(r'\bangular\s*\.\s*(?:module|bootstrap)\s*\(', lower_html)
+            )
+            vue_signature = bool(
+                re.search(r'\bv-(?:html|text|bind|model|if|for)\b', lower_html)
+                or re.search(r'\b(?:new\s+vue|vue\s*\.\s*createapp)\s*\(', lower_html)
+            )
+            if angular_signature:
                 ctx_type = ContextType.CSTI_ANGULAR
-            elif "v-app" in html_content or "vue" in html_content.lower():
+            elif vue_signature:
                 ctx_type = ContextType.CSTI_VUE
             else:
                 ctx_type = ContextType.CSTI_GENERIC
+
+            executable = (
+                ctx_type in {ContextType.CSTI_ANGULAR, ContextType.CSTI_VUE}
+                and not contains_rendered_markup
+            )
 
             contexts.append(
                 ClassifiedContext(
                     context_type=ctx_type,
                     snippet=snippet,
-                    is_js_executable=True,
-                    metadata={"delimiter": "{{...}}"},
+                    is_js_executable=executable,
+                    metadata={
+                        "delimiter": "{{...}}",
+                        "framework_signature": ctx_type.value if executable else None,
+                        "confidence": "firm" if executable else "tentative",
+                        "requires_runtime_compiler": True,
+                    },
                 )
             )
         return contexts
@@ -441,8 +510,14 @@ class EnhancedContextClassifier:
         if not tag:
             return "html"
         curr = tag
+        first = tag
         while curr and hasattr(curr, "name"):
             name = (curr.name or "").lower()
+            # HTML integration point: descendants of SVG foreignObject are
+            # parsed in the HTML namespace, while the foreignObject element
+            # itself remains part of SVG.
+            if name == "foreignobject" and curr is not first:
+                return "html"
             if name == "svg":
                 return "svg"
             if name == "math":
