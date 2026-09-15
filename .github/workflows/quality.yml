@@ -18,7 +18,7 @@ jobs:
       UPSTREAM_ROTATING_PROXY_ENABLED: "False"
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with: {python-version: "3.12"}
       - uses: actions/setup-node@v4
         with: {node-version: "22", cache: npm, cache-dependency-path: ui/package-lock.json}
@@ -51,7 +51,7 @@ jobs:
       CAPTURE_DOM_SNAPSHOT: hits
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with: {python-version: "3.12"}
       - run: pip install -r backend_api/requirements.txt
       - run: python -m playwright install --with-deps chromium
@@ -83,7 +83,7 @@ jobs:
       DATABASE_URL: postgresql://xssboss:xssboss-test@localhost:5432/xssboss
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with: {python-version: "3.12"}
       - run: pip install -r backend_api/requirements.txt
       - run: alembic -c backend_api/alembic.ini upgrade head
@@ -147,7 +147,7 @@ jobs:
       AUDIT_MODE: celery
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with: {python-version: "3.12"}
       - run: pip install -r backend_api/requirements.txt
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client
