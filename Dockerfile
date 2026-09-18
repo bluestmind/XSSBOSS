@@ -32,7 +32,7 @@ RUN npm ci
 COPY ui/ ./
 RUN npm run build
 
-FROM nginx:1.27-alpine AS ui
+FROM nginx:1.29-alpine AS ui
 COPY deploy/nginx.conf /etc/nginx/templates/default.conf.template
 COPY --from=ui-build /ui/dist /usr/share/nginx/html
 EXPOSE 80
