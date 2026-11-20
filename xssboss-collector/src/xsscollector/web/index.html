@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>XSSBOSS Collector</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+  <svg class="icon-sprite" aria-hidden="true">
+    <symbol id="i-grid" viewBox="0 0 24 24"><path d="M4 4h6v6H4zm10 0h6v6h-6zM4 14h6v6H4zm10 0h6v6h-6z"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-compare" viewBox="0 0 24 24"><path d="M8 4 4 8l4 4M4 8h12M16 20l4-4-4-4m4 4H8"/></symbol>
+    <symbol id="i-table" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 4v16"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1A8 8 0 0 0 15 6.2L14.7 4h-4L10.4 6.2a8 8 0 0 0-1.6.9l-2.3-1-2 3.4L6.4 11a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1a8 8 0 0 0 1.6.9l.3 2.2h4l.3-2.2a8 8 0 0 0 1.6-.9l2.3 1 2-3.4-2-1.5a7 7 0 0 0 .1-1Z"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="m8 9-3 3 3 3m8-6 3 3-3 3m-2-9-4 12"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4m0 0L7 9m5-5 5 5M5 14v5h14v-5"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v12m0 0 5-5m-5 5-5-5M5 20h14"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2.7 20h18.6ZM12 9v4m0 3v.1"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 15.5A8.5 8.5 0 0 1 8.5 4 8.5 8.5 0 1 0 20 15.5Z"/></symbol>
+  </svg>
+
+  <div class="shell">
+    <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
+      <div class="brand"><span class="brand-mark">XB</span><span><strong>XSSBOSS</strong><small>COLLECTOR</small></span></div>
+      <nav class="nav-list">
+        <button class="nav-item active" data-view="overview"><svg><use href="#i-grid"/></svg><span>Overview</span></button>
+        <button class="nav-item" data-view="new-run"><svg><use href="#i-plus"/></svg><span>New run</span></button>
+        <button class="nav-item" data-view="runs"><svg><use href="#i-clock"/></svg><span>Run history</span></button>
+        <button class="nav-item" data-view="compare"><svg><use href="#i-compare"/></svg><span>Compare</span></button>
+        <button class="nav-item" data-view="results"><svg><use href="#i-table"/></svg><span>Results</span></button>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="safety"><svg><use href="#i-check"/></svg><span><strong>Collection only</strong><small>GET requests, exact scope</small></span></div>
+        <button class="nav-item" id="openSettings"><svg><use href="#i-settings"/></svg><span>Settings</span></button>
+      </div>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <button class="icon-button mobile-menu" id="menuButton" aria-label="Open navigation"><svg><use href="#i-menu"/></svg></button>
+        <div><p class="eyebrow" id="viewEyebrow">Workspace</p><h1 id="viewTitle">Overview</h1></div>
+        <div class="top-actions">
+          <span class="status-pill"><span class="status-dot"></span>Local</span>
+          <button class="icon-button" id="themeButton" aria-label="Toggle color theme"><svg><use href="#i-moon"/></svg></button>
+          <button class="button primary compact" data-view="new-run"><svg><use href="#i-plus"/></svg>New run</button>
+        </div>
+      </header>
+
+      <main id="main" tabindex="-1">
+        <section class="view active" id="view-overview" aria-labelledby="overview-heading">
+          <div class="hero">
+            <div><p class="eyebrow">Senior data collection workspace</p><h2 id="overview-heading">See the whole application surface.</h2><p>Collect safely, map JavaScript data flows, and compare every change from one calm workspace.</p></div>
+            <button class="button hero-button" data-view="new-run"><svg><use href="#i-plus"/></svg>Start a guided run</button>
+          </div>
+          <div class="metric-grid" id="metricGrid" aria-label="Latest run metrics"></div>
+          <div class="dashboard-grid">
+            <section class="panel span-2"><div class="panel-head"><div><p class="eyebrow">Recent activity</p><h2>Latest runs</h2></div><button class="text-button" data-view="runs">View all runs</button></div><div class="table-scroll"><table><thead><tr><th>Run</th><th>Mode</th><th>Status</th><th>Started</th><th>Endpoints</th><th>JS sinks</th><th></th></tr></thead><tbody id="recentRuns"></tbody></table></div></section>
+            <section class="panel"><div class="panel-head"><div><p class="eyebrow">Quick start</p><h2>Choose a workflow</h2></div></div><div class="quick-list">
+              <button class="quick-action" data-new-mode="js"><span class="action-icon"><svg><use href="#i-code"/></svg></span><span><strong>Analyze JS/TS</strong><small>Drop source files or a folder</small></span></button>
+              <button class="quick-action" data-new-mode="collect"><span class="action-icon"><svg><use href="#i-globe"/></svg></span><span><strong>Collect a site</strong><small>Bounded, GET-only discovery</small></span></button>
+              <button class="quick-action" data-new-mode="import"><span class="action-icon"><svg><use href="#i-upload"/></svg></span><span><strong>Import evidence</strong><small>Captures, specs, URLs, or a site mirror</small></span></button>
+            </div></section>
+          </div>
+        </section>
+
+        <section class="view" id="view-new-run" aria-labelledby="new-run-heading">
+          <div class="section-intro"><p class="eyebrow">Guided workflow</p><h2 id="new-run-heading">What would you like to collect?</h2><p>Pick one method. We will validate everything before starting.</p></div>
+          <div class="mode-picker" role="tablist" aria-label="Collection method">
+            <button role="tab" aria-selected="true" data-mode="js"><svg><use href="#i-code"/></svg><span><strong>Analyze JS/TS</strong><small>Local source files</small></span></button>
+            <button role="tab" aria-selected="false" data-mode="collect"><svg><use href="#i-globe"/></svg><span><strong>Collect site</strong><small>Authorized URLs</small></span></button>
+            <button role="tab" aria-selected="false" data-mode="import"><svg><use href="#i-upload"/></svg><span><strong>Import evidence</strong><small>Capture or mirror</small></span></button>
+          </div>
+
+          <form class="run-form active" id="jsForm" data-form="js">
+            <div class="form-head"><span class="step">1</span><div><h2>Choose JavaScript or TypeScript</h2><p>Files are analyzed locally and never executed.</p></div></div>
+            <div class="drop-zone" id="jsDrop"><input id="jsFiles" type="file" accept=".js,.mjs,.cjs,.jsx,.ts,.tsx" multiple><input id="jsFolder" type="file" accept=".js,.mjs,.cjs,.jsx,.ts,.tsx" multiple webkitdirectory><svg><use href="#i-upload"/></svg><strong>Drop source files here</strong><span>or choose individual files or an entire folder</span><div class="drop-actions"><button class="button secondary compact" id="chooseJsFiles" type="button">Choose files</button><button class="button secondary compact" id="chooseJsFolder" type="button">Choose folder</button></div><small id="jsFileSummary">No files selected</small></div>
+            <div class="field"><label for="jsBaseUrl">Analysis base URL</label><input id="jsBaseUrl" name="base_url" type="url" required value="https://example.com/static-analysis/" aria-describedby="jsBaseHelp"><small id="jsBaseHelp">Must match an allowed scope rule. It gives local files stable identities for comparison.</small></div>
+            <div class="form-actions"><span class="privacy-note"><svg><use href="#i-check"/></svg>No code execution. Sensitive values are redacted.</span><button class="button primary" type="submit"><svg><use href="#i-code"/></svg>Analyze selected files</button></div>
+          </form>
+
+          <form class="run-form" id="collectForm" data-form="collect">
+            <div class="form-head"><span class="step">1</span><div><h2>Add authorized seed URLs</h2><p>The collector uses GET only and cannot leave your configured scope.</p></div></div>
+            <div class="field"><label for="collectUrls">Seed URLs <span>one per line</span></label><textarea id="collectUrls" rows="7" required placeholder="https://app.example.com/&#10;https://api.example.com/docs"></textarea><small>Start with the smallest useful set. Linked in-scope pages are discovered automatically.</small></div>
+            <div class="authorization-banner" id="authorizationBanner" hidden><svg><use href="#i-alert"/></svg><div><strong>Authorization confirmation required</strong><span>Open Settings and confirm that you have permission before live collection.</span></div><button class="button secondary compact" type="button" id="authorizeButton">Open settings</button></div>
+            <div class="form-actions"><span class="privacy-note"><svg><use href="#i-check"/></svg>Robots respected. Private networks allowed.</span><button class="button primary" type="submit"><svg><use href="#i-globe"/></svg>Start collection</button></div>
+          </form>
+
+          <form class="run-form" id="importForm" data-form="import">
+            <div class="form-head"><span class="step">1</span><div><h2>Import existing collection data</h2><p>Evidence is inventoried offline, never replayed, executed, or served.</p></div></div>
+            <div class="field-grid"><div class="field"><label for="importFormat">Evidence format</label><select id="importFormat"><option value="har">HAR capture</option><option value="burp">Burp XML</option><option value="openapi">OpenAPI JSON</option><option value="urls">URL list</option><option value="mirror">Website mirror folder</option></select></div><div class="field" id="openapiBaseField" hidden><label for="openapiBase" id="importBaseLabel">OpenAPI base URL</label><input id="openapiBase" type="url" placeholder="https://api.example.com/"><small id="importBaseHelp">Used to resolve relative routes.</small></div></div>
+            <label class="drop-zone compact-drop" id="importDrop"><input id="importFile" type="file" accept=".har,.json" required><svg><use href="#i-upload"/></svg><strong>Drop the evidence file here</strong><span id="importFileSummary">or click to choose one file</span></label>
+            <label class="drop-zone compact-drop" id="mirrorDrop" hidden><input id="mirrorFolder" type="file" multiple webkitdirectory><svg><use href="#i-upload"/></svg><strong>Choose the downloaded website folder</strong><span id="mirrorFileSummary">HTML, CSS, JS/TS, maps, JSON, XML, SVG, and text are analyzed</span></label>
+            <div class="form-actions"><span class="privacy-note"><svg><use href="#i-check"/></svg>Secrets are redacted; mirror code is never executed.</span><button class="button primary" type="submit"><svg><use href="#i-upload"/></svg>Import and analyze</button></div>
+          </form>
+        </section>
+
+        <section class="view" id="view-runs" aria-labelledby="runs-heading">
+          <div class="section-toolbar"><div><p class="eyebrow">Audit trail</p><h2 id="runs-heading">Run history</h2><p>Every collection and import remains independently reviewable.</p></div><button class="button primary" data-view="new-run"><svg><use href="#i-plus"/></svg>New run</button></div>
+          <section class="panel"><div class="filter-row"><label class="search"><svg><use href="#i-search"/></svg><span class="sr-only">Search runs</span><input id="runSearch" type="search" placeholder="Search by run, mode, or status"></label><span id="runCount" class="muted"></span></div><div class="table-scroll"><table><thead><tr><th>Run</th><th>Mode</th><th>Status</th><th>Started</th><th>Duration</th><th>Endpoints</th><th>Functions</th><th>Sinks</th><th>Actions</th></tr></thead><tbody id="runsTable"></tbody></table></div></section>
+        </section>
+
+        <section class="view" id="view-compare" aria-labelledby="compare-heading">
+          <div class="section-intro"><p class="eyebrow">Change intelligence</p><h2 id="compare-heading">Compare any two runs</h2><p>Review added, removed, and changed records across all 20 categories.</p></div>
+          <form class="compare-bar" id="compareForm"><div class="field"><label for="fromRun">Earlier run</label><select id="fromRun" required></select></div><span class="compare-arrow"><svg><use href="#i-compare"/></svg></span><div class="field"><label for="toRun">Later run</label><select id="toRun" required></select></div><button class="button primary" type="submit">Compare runs</button></form>
+          <div id="diffEmpty" class="empty-state"><span class="empty-icon"><svg><use href="#i-compare"/></svg></span><h2>Choose two runs to see every difference</h2><p>The report separates real changes from unchanged records.</p></div>
+          <div id="diffResults" hidden><div class="metric-grid diff-metrics" id="diffMetrics"></div><div class="results-toolbar"><div class="filter-row"><label class="search"><svg><use href="#i-search"/></svg><span class="sr-only">Filter difference categories</span><input id="diffSearch" type="search" placeholder="Filter difference tables"></label></div><div class="download-group"><a class="button secondary compact" id="diffHtml" href="#"><svg><use href="#i-download"/></svg>HTML</a><a class="button secondary compact" id="diffJson" href="#">JSON</a><a class="button secondary compact" id="diffMd" href="#">Markdown</a></div></div><div id="diffCategories" class="category-stack"></div></div>
+        </section>
+
+        <section class="view" id="view-results" aria-labelledby="results-heading">
+          <div class="section-toolbar"><div><p class="eyebrow">Evidence explorer</p><h2 id="results-heading">Run results</h2><p>Search every endpoint and JavaScript analysis table.</p></div><div class="field inline-field"><label for="resultRun">Run</label><select id="resultRun"></select></div></div>
+          <div id="resultEmpty" class="empty-state"><span class="empty-icon"><svg><use href="#i-table"/></svg></span><h2>No run selected</h2><p>Complete a run or choose one from history.</p></div>
+          <div id="resultContent" hidden><div class="metric-grid" id="resultMetrics"></div><div class="results-toolbar"><div class="filter-row"><label class="search"><svg><use href="#i-search"/></svg><span class="sr-only">Search current result table</span><input id="resultSearch" type="search" placeholder="Search the current table"></label></div><div class="download-group"><a class="button secondary compact" id="inventoryHtml" href="#"><svg><use href="#i-download"/></svg>HTML report</a><a class="button secondary compact" id="inventoryJson" href="#">JSON</a><a class="button secondary compact" id="inventoryCsv" href="#">CSV</a></div></div><div class="data-tabs" id="dataTabs" role="tablist" aria-label="Result category"></div><section class="panel result-panel"><div class="panel-head"><div><h2 id="resultTableTitle">Endpoints</h2><p id="resultTableCount"></p></div><div class="pagination" aria-label="Table pages"><button id="resultPrevious" type="button">Previous</button><span id="resultPage">Page 1</span><button id="resultNext" type="button">Next</button></div></div><div class="table-scroll tall"><table><thead id="resultHead"></thead><tbody id="resultBody"></tbody></table></div></section></div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <dialog id="settingsDialog" aria-labelledby="settingsTitle">
+    <form method="dialog" class="dialog-shell" id="settingsForm">
+      <div class="dialog-head"><div><p class="eyebrow">Safety and limits</p><h2 id="settingsTitle">Workspace settings</h2></div><button class="icon-button" value="cancel" aria-label="Close settings">×</button></div>
+      <div class="dialog-body">
+        <div class="setup-note"><svg><use href="#i-check"/></svg><p><strong>Exact scope comes first.</strong><span>Every live URL, redirect, and discovered link is checked against these rules.</span></p></div>
+        <div class="field"><label for="scopeAllow">Allowed scope <span>one rule per line</span></label><textarea id="scopeAllow" rows="4" required></textarea><small>Examples: https://app.example.com/ or *.sandbox.example.com</small></div>
+        <div class="field"><label for="scopeDeny">Denied scope <span>optional</span></label><textarea id="scopeDeny" rows="3"></textarea><small>Denied rules always override allowed rules.</small></div>
+        <div class="field-grid three"><div class="field"><label for="crawlProfile">Collection profile</label><select id="crawlProfile"><option value="passive">Passive</option><option value="standard">Standard</option><option value="deep">Deep</option></select></div><div class="field"><label for="maxPages">Maximum pages</label><input id="maxPages" type="number" min="1" max="1000000"></div><div class="field"><label for="maxDepth">Link depth</label><input id="maxDepth" type="number" min="0" max="20"></div></div>
+        <div class="field"><label for="requestsPerSecond">Requests per second</label><input id="requestsPerSecond" type="number" min="0.05" max="100" step="0.05"><small>Lower values reduce load on the authorized target.</small></div>
+        <label class="check-row"><input id="privateNetworks" type="checkbox" checked><span><strong>Allow explicitly scoped private networks</strong><small>Enabled for local, lab, and staging targets.</small></span></label>
+        <label class="check-row authorization-check"><input id="authorizedUse" type="checkbox" checked><span><strong>Authorization confirmed for allowed scope.</strong></span></label>
+      </div>
+      <div class="dialog-actions"><button class="button secondary" value="cancel">Cancel</button><button class="button primary" id="saveSettings" value="default"><svg><use href="#i-check"/></svg>Save settings</button></div>
+    </form>
+  </dialog>
+
+  <div class="loading" id="loading" hidden role="status" aria-live="polite"><div class="spinner"></div><strong id="loadingTitle">Working…</strong><span id="loadingText">Please keep this tab open.</span></div>
+  <div class="toast-region" id="toasts" aria-live="polite" aria-atomic="true"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

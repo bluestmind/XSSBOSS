@@ -9,4 +9,5 @@ dist/
 build/
 collector.toml
 *.html
+!/src/xsscollector/web/index.html
 *.jsonl
