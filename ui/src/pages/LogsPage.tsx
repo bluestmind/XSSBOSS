@@ -1,5 +1,6 @@
 import React, { useCallback, useState, useEffect, useRef, useMemo } from 'react';
-import axios from 'axios';
+import { isAxiosError } from 'axios';
+import api from '@/utils/request';
 import {
   Terminal,
   Activity,
@@ -115,6 +116,7 @@ const LogsPage: React.FC = () => {
     modules: {},
   });
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [requestError, setRequestError] = useState<string | null>(null);
   const [isLiveStreaming, setIsLiveStreaming] = useState<boolean>(true);
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
   const [selectedModule, setSelectedModule] = useState<string>('all');
@@ -125,13 +127,18 @@ const LogsPage: React.FC = () => {
   const [copiedAll, setCopiedAll] = useState<boolean>(false);
 
   const terminalEndRef = useRef<HTMLDivElement>(null);
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const logRequest = useRef<AbortController | null>(null);
+  const hasAuthToken = Boolean(localStorage.getItem('auth_token'));
 
-  // Fetch initial batch of logs and statistics
+  // Fetch a filtered snapshot and its aggregate statistics.
   const fetchLogs = useCallback(async () => {
+    logRequest.current?.abort();
+    const request = new AbortController();
+    logRequest.current = request;
     try {
       const [logsRes, statsRes] = await Promise.all([
-        axios.get('/api/v1/logs', {
+        api.get<{ logs: LogItem[] }>('/logs', {
+          signal: request.signal,
           params: {
             limit: 300,
             level: selectedLevel !== 'ALL' ? selectedLevel : undefined,
@@ -139,38 +146,45 @@ const LogsPage: React.FC = () => {
             search: searchQuery.trim() ? searchQuery.trim() : undefined,
           },
         }),
-        axios.get('/api/v1/logs/stats'),
+        api.get<LogStats>('/logs/stats', { signal: request.signal }),
       ]);
 
-      if (logsRes.data && Array.isArray(logsRes.data.logs)) {
-        setLogs(logsRes.data.logs);
-      }
-      if (statsRes.data) {
-        setStats(statsRes.data);
-      }
+      if (request.signal.aborted) return;
+      setLogs(logsRes.data.logs);
+      setStats(statsRes.data);
+      setRequestError(null);
     } catch (err) {
-      console.error('Failed to fetch diagnostic logs:', err);
+      if (request.signal.aborted) return;
+      setRequestError(isAxiosError(err) && err.response?.status === 401
+        ? 'The API rejected the credentials for diagnostic logs.'
+        : 'Diagnostic logs are unavailable. Try refreshing.');
     } finally {
-      setIsLoading(false);
+      if (logRequest.current === request) {
+        logRequest.current = null;
+        if (!request.signal.aborted) setIsLoading(false);
+      }
     }
   }, [selectedLevel, selectedModule, searchQuery]);
 
   useEffect(() => {
-    fetchLogs();
-  }, [fetchLogs]);
+    void fetchLogs();
+    // EventSource cannot send the API bearer header.
+    const refresh = hasAuthToken && isLiveStreaming
+      ? window.setInterval(() => {
+          if (!logRequest.current) void fetchLogs();
+        }, 3000)
+      : undefined;
+    return () => {
+      window.clearInterval(refresh);
+      logRequest.current?.abort();
+    };
+  }, [fetchLogs, hasAuthToken, isLiveStreaming]);
 
   // Connect Server-Sent Events (SSE) stream for live diagnostic logs
   useEffect(() => {
-    if (!isLiveStreaming) {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
-      }
-      return;
-    }
+    if (!isLiveStreaming || hasAuthToken) return;
 
     const es = new EventSource('/api/v1/logs/stream');
-    eventSourceRef.current = es;
 
     es.onmessage = (event) => {
       try {
@@ -203,22 +217,16 @@ const LogsPage: React.FC = () => {
       }
     };
 
-    es.onerror = () => {
-      // Reconnection handled automatically by browser EventSource
-    };
+    return () => es.close();
+  }, [hasAuthToken, isLiveStreaming]);
 
-    return () => {
-      es.close();
-      eventSourceRef.current = null;
-    };
-  }, [isLiveStreaming]);
-
+  const latestLogId = logs[0]?.id;
   // Auto-scroll when new logs arrive if enabled
   useEffect(() => {
     if (autoScroll && terminalEndRef.current) {
       terminalEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [logs, autoScroll]);
+  }, [latestLogId, autoScroll]);
 
   // Filter logs for visible display
   const filteredLogs = useMemo(() => {
@@ -239,29 +247,38 @@ const LogsPage: React.FC = () => {
   const handleClearLogs = async () => {
     if (!window.confirm('Clear all captured diagnostic log entries?')) return;
     try {
-      await axios.delete('/api/v1/logs/clear');
-      setLogs([]);
-      setStats({ total: 0, hits: 0, errors: 0, warnings: 0, info: 0, debug: 0, modules: {} });
-    } catch (err) {
-      console.error('Failed to clear logs:', err);
+      await api.delete('/logs/clear');
+      await fetchLogs();
+    } catch {
+      setRequestError('Diagnostic logs could not be cleared.');
     }
   };
 
-  const handleCopyLog = (log: LogItem) => {
+  const copyText = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      setRequestError('The browser did not allow clipboard access.');
+      return false;
+    }
+  };
+
+  const handleCopyLog = async (log: LogItem) => {
     const text = `[${log.timestamp}] [${log.level}] [${log.module.toUpperCase()}] ${log.message}${log.detail ? '\nDetail: ' + log.detail : ''}${log.data && Object.keys(log.data).length ? '\nData: ' + JSON.stringify(log.data, null, 2) : ''}`;
-    navigator.clipboard.writeText(text);
+    if (!await copyText(text)) return;
     setCopiedId(log.id);
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const handleCopyAll = () => {
+  const handleCopyAll = async () => {
     const text = filteredLogs
       .map(
         (l) =>
           `[${l.timestamp}] [${l.level}] [${l.module.toUpperCase()}] ${l.message}${l.detail ? ' | ' + l.detail : ''}`
       )
       .join('\n');
-    navigator.clipboard.writeText(text);
+    if (!await copyText(text)) return;
     setCopiedAll(true);
     setTimeout(() => setCopiedAll(false), 2000);
   };
@@ -379,6 +396,8 @@ const LogsPage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {requestError && <p role="alert" className="text-sm text-rose-300">{requestError}</p>}
 
       {/* KPI Stats Summary Cards */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">

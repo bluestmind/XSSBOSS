@@ -7,40 +7,52 @@ import logging
 import re
 from collections import deque
 from datetime import datetime, timezone
+from threading import Lock
 from typing import Any, AsyncGenerator, Dict, List, Optional
-from sqlalchemy import desc
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session
 
 from backend_api.db.session import SessionLocal
+from backend_api.models.experiment import Experiment
 from backend_api.models.log_event import LogEvent
+from backend_api.models.target import Target
 
 
 class DiagnosticRingBuffer:
     """Thread-safe in-memory ring buffer for low-latency live streaming."""
     def __init__(self, maxlen: int = 3000):
         self.buffer: deque[Dict[str, Any]] = deque(maxlen=maxlen)
-        self._listeners: List[asyncio.Queue] = []
+        self._listeners: dict[asyncio.Queue, asyncio.AbstractEventLoop] = {}
+        self._lock = Lock()
 
     def append(self, event: Dict[str, Any]) -> None:
-        self.buffer.append(event)
-        for queue in list(self._listeners):
+        with self._lock:
+            self.buffer.append(event)
+            listeners = tuple(self._listeners.items())
+        for queue, loop in listeners:
             try:
-                queue.put_nowait(event)
-            except Exception:
-                pass
+                loop.call_soon_threadsafe(self._deliver, queue, event)
+            except RuntimeError:
+                self.remove_listener(queue)
+
+    @staticmethod
+    def _deliver(queue: asyncio.Queue, event: Dict[str, Any]) -> None:
+        if not queue.full():
+            queue.put_nowait(event)
 
     def get_recent(self, limit: int = 100) -> List[Dict[str, Any]]:
-        items = list(self.buffer)
-        return items[-limit:]
+        with self._lock:
+            return list(self.buffer)[-limit:]
 
     def add_listener(self) -> asyncio.Queue:
         queue: asyncio.Queue = asyncio.Queue(maxsize=500)
-        self._listeners.append(queue)
+        with self._lock:
+            self._listeners[queue] = asyncio.get_running_loop()
         return queue
 
     def remove_listener(self, queue: asyncio.Queue) -> None:
-        if queue in self._listeners:
-            self._listeners.remove(queue)
+        with self._lock:
+            self._listeners.pop(queue, None)
 
 
 ring_buffer = DiagnosticRingBuffer()
@@ -126,10 +138,6 @@ class LogService:
             "data": safe_data,
         }
 
-        # Broadcast to in-memory ring buffer
-        ring_buffer.append(event_dict)
-
-        # Persist to database
         own_session = False
         if db is None:
             db = SessionLocal()
@@ -159,6 +167,7 @@ class LogService:
             if own_session:
                 db.close()
 
+        ring_buffer.append(event_dict)
         return event_dict
 
     @classmethod
@@ -182,7 +191,24 @@ class LogService:
         return cls.emit("DEBUG", module, message, detail=detail, **kwargs)
 
     @staticmethod
+    def query_events(db: Session):
+        """Only expose events whose resource references belong to this tenant."""
+        query = db.query(LogEvent)
+        tenant_id = db.info.get("tenant_id")
+        if tenant_id is None:
+            return query
+
+        target_ids = select(Target.id).where(Target.tenant_id == tenant_id)
+        experiment_ids = select(Experiment.id).where(Experiment.target_id.in_(target_ids))
+        return query.filter(
+            or_(LogEvent.target_id.is_not(None), LogEvent.experiment_id.is_not(None)),
+            or_(LogEvent.target_id.is_(None), LogEvent.target_id.in_(target_ids)),
+            or_(LogEvent.experiment_id.is_(None), LogEvent.experiment_id.in_(experiment_ids)),
+        )
+
+    @classmethod
     def get_logs(
+        cls,
         db: Session,
         level: Optional[str] = None,
         module: Optional[str] = None,
@@ -194,7 +220,7 @@ class LogService:
         offset: int = 0,
     ) -> Dict[str, Any]:
         """Query diagnostic logs from DB with multi-facet filters."""
-        query = db.query(LogEvent)
+        query = cls.query_events(db)
 
         if level and level.upper() != "ALL":
             query = query.filter(LogEvent.level == level.upper())
@@ -224,10 +250,10 @@ class LogService:
             "logs": [log.to_dict() for log in logs],
         }
 
-    @staticmethod
-    def get_stats(db: Session, experiment_id: Optional[int] = None) -> Dict[str, Any]:
+    @classmethod
+    def get_stats(cls, db: Session, experiment_id: Optional[int] = None) -> Dict[str, Any]:
         """Get aggregate counts for log levels and modules."""
-        query = db.query(LogEvent)
+        query = cls.query_events(db)
         if experiment_id:
             query = query.filter(LogEvent.experiment_id == experiment_id)
 
@@ -239,10 +265,8 @@ class LogService:
         debugs = query.filter(LogEvent.level == "DEBUG").count()
 
         # Modules breakdown
-        from sqlalchemy import func
         module_rows = (
-            db.query(LogEvent.module, func.count(LogEvent.id))
-            .filter(LogEvent.experiment_id == experiment_id if experiment_id else True)
+            query.with_entities(LogEvent.module, func.count(LogEvent.id))
             .group_by(LogEvent.module)
             .all()
         )
@@ -258,19 +282,50 @@ class LogService:
             "modules": module_counts,
         }
 
-    @staticmethod
-    def clear_logs(db: Session, experiment_id: Optional[int] = None) -> int:
+    @classmethod
+    def clear_logs(cls, db: Session, experiment_id: Optional[int] = None) -> int:
         """Clear log entries."""
-        query = db.query(LogEvent)
+        query = cls.query_events(db)
         if experiment_id:
             query = query.filter(LogEvent.experiment_id == experiment_id)
         deleted = query.delete(synchronize_session=False)
         db.commit()
         return deleted
 
-    @staticmethod
-    async def stream_logs() -> AsyncGenerator[str, None]:
+    @classmethod
+    def _read_tenant_stream(cls, tenant_id: int, cursor: Optional[int]):
+        with SessionLocal(info={"tenant_id": tenant_id}) as db:
+            query = cls.query_events(db)
+            if cursor is None:
+                return query.with_entities(func.max(LogEvent.id)).scalar() or 0
+            rows = query.filter(LogEvent.id > cursor).order_by(LogEvent.id).limit(250).all()
+            return [row.to_dict() for row in rows]
+
+    @classmethod
+    async def _stream_tenant_logs(cls, tenant_id: int) -> AsyncGenerator[str, None]:
+        cursor = await asyncio.to_thread(cls._read_tenant_stream, tenant_id, None)
+        yield f"data: {json.dumps({'type': 'connected'})}\n\n"
+        idle_polls = 0
+        while True:
+            events = await asyncio.to_thread(cls._read_tenant_stream, tenant_id, cursor)
+            for event in events:
+                cursor = event["id"]
+                yield f"data: {json.dumps(event)}\n\n"
+            idle_polls = 0 if events else idle_polls + 1
+            if idle_polls >= 10:
+                yield ": heartbeat\n\n"
+                idle_polls = 0
+            if len(events) < 250:
+                await asyncio.sleep(2)
+
+    @classmethod
+    async def stream_logs(cls, tenant_id: Optional[int] = None) -> AsyncGenerator[str, None]:
         """SSE generator streaming live diagnostic events."""
+        if tenant_id is not None:
+            async for frame in cls._stream_tenant_logs(tenant_id):
+                yield frame
+            return
+
         queue = ring_buffer.add_listener()
         try:
             # Yield initial connect handshake
@@ -316,8 +371,8 @@ class PythonLogHandlerBridge(logging.Handler):
                 "module": module.lower(),
                 "experiment_id": experiment_id,
                 "target_id": target_id,
-                "message": msg,
-                "detail": detail,
+                "message": LogService._sanitize(msg),
+                "detail": LogService._sanitize(detail),
                 "data": {},
             })
         except Exception:

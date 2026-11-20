@@ -4,7 +4,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from backend_api.models.base import BaseModel
+from backend_api.models.experiment import Experiment, ExperimentStrategy
 from backend_api.models.log_event import LogEvent
+from backend_api.models.target import Target
 from backend_api.services.log_service import LogService, ring_buffer
 
 
@@ -71,6 +73,31 @@ class LogServiceTests(unittest.TestCase):
         deleted = LogService.clear_logs(self.db, experiment_id=5)
         self.assertEqual(deleted, 2)
         self.assertEqual(LogService.get_logs(self.db, experiment_id=5)["total"], 0)
+
+    def test_tenant_log_reads_counts_and_clear_use_the_same_scope(self):
+        own = Target(tenant_id=10, name="Own", base_url="https://own.example")
+        other = Target(tenant_id=20, name="Other", base_url="https://other.example")
+        self.db.add_all([own, other])
+        self.db.flush()
+        experiment = Experiment(target_id=own.id, name="Run", strategy=ExperimentStrategy.SMART_ADAPTIVE)
+        self.db.add(experiment)
+        self.db.flush()
+        self.db.add_all([
+            LogEvent(module="own", message="Own experiment", experiment_id=experiment.id),
+            LogEvent(module="own", message="Own target", target_id=own.id),
+            LogEvent(module="other", message="Other target", target_id=other.id),
+            LogEvent(module="other", message="Mixed ownership", target_id=other.id, experiment_id=experiment.id),
+            LogEvent(module="system", message="Unscoped event"),
+        ])
+        self.db.commit()
+
+        self.db.info["tenant_id"] = 10
+        self.assertEqual(LogService.get_logs(self.db)["total"], 2)
+        self.assertEqual(LogService.get_stats(self.db)["modules"], {"own": 2})
+        self.assertEqual(LogService.clear_logs(self.db), 2)
+        self.assertEqual(LogService.get_logs(self.db)["logs"], [])
+        self.db.info.pop("tenant_id")
+        self.assertEqual(LogService.get_logs(self.db)["total"], 3)
 
     def test_ring_buffer_integration(self):
         initial_count = len(ring_buffer.get_recent(500))

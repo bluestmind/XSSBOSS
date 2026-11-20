@@ -41,10 +41,10 @@ _KNOWN_ROUTE_GROUPS = frozenset({
 
 def _route_group(path: str) -> str:
     """Use a bounded metric label set, never request-controlled path segments."""
-    if not path.startswith("/api/v1/"):
+    prefix = f"{settings.API_PREFIX}/"
+    if not path.startswith(prefix):
         return "system"
-    parts = path.split("/")
-    candidate = parts[3] if len(parts) > 3 else ""
+    candidate = path[len(prefix):].split("/", 1)[0]
     return candidate if candidate in _KNOWN_ROUTE_GROUPS else "unmatched"
 
 
@@ -281,8 +281,13 @@ async def xssboss_exception_handler(request: Request, exc: XSSBossException):
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """Handle validation errors."""
     return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={"detail": exc.errors()}
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        content={
+            "detail": [
+                {key: error[key] for key in ("loc", "msg", "type")}
+                for error in exc.errors()
+            ],
+        },
     )
 
 
@@ -317,7 +322,7 @@ app.include_router(burp.router, prefix=settings.API_PREFIX)
 app.include_router(proxy.router, prefix=settings.API_PREFIX)
 app.include_router(hackerone.router, prefix=settings.API_PREFIX)
 app.include_router(programs.router, prefix=settings.API_PREFIX)
-app.include_router(logs.router)
+app.include_router(logs.router, prefix=settings.API_PREFIX)
 
 @app.get("/")
 def root():

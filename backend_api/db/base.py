@@ -1,5 +1,4 @@
 """Database initialization."""
-"""Database initialization."""
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from backend_api.config import settings
@@ -44,8 +43,7 @@ def init_db():
 
     project_root = Path(__file__).resolve().parents[2]
     config = Config(str(project_root / "backend_api" / "alembic.ini"))
-    config.set_main_option("script_location", str(project_root / "backend_api" / "db" / "migrations"))
-    config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+    config.attributes["configure_logging"] = False
     command.upgrade(config, "head")
 
 

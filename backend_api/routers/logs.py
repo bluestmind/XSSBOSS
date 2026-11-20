@@ -1,14 +1,29 @@
 """Diagnostic Logs API Router."""
 from typing import Any, Dict, Optional
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 import json
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from backend_api.db.session import get_db
+from backend_api.models.experiment import Experiment
+from backend_api.models.log_event import LogEvent
+from backend_api.models.target import Target
 from backend_api.services.log_service import LogService
+from backend_api.tenancy import current_tenant_id
 
-router = APIRouter(prefix="/api/v1/logs", tags=["Diagnostic Logs"])
+router = APIRouter(prefix="/logs", tags=["Diagnostic Logs"])
+
+
+class LogCreate(BaseModel):
+    level: str = Field(default="INFO", max_length=20)
+    module: str = Field(default="custom", max_length=50)
+    message: str = ""
+    detail: Optional[str] = None
+    experiment_id: Optional[int] = Field(default=None, ge=1)
+    target_id: Optional[int] = Field(default=None, ge=1)
+    data: Optional[Dict[str, Any]] = None
 
 
 @router.get("", response_model=Dict[str, Any])
@@ -52,10 +67,8 @@ def export_experiment_logs(
     db: Session = Depends(get_db),
 ):
     """Download the entire durable event stream as chronological JSON Lines."""
-    from backend_api.models.log_event import LogEvent
-
     rows = (
-        db.query(LogEvent)
+        LogService.query_events(db)
         .filter(LogEvent.experiment_id == experiment_id)
         .order_by(LogEvent.id.asc())
         .all()
@@ -79,7 +92,7 @@ def export_experiment_logs(
 async def stream_logs():
     """Stream live diagnostic logs via Server-Sent Events (SSE)."""
     return StreamingResponse(
-        LogService.stream_logs(),
+        LogService.stream_logs(current_tenant_id.get()),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -101,26 +114,21 @@ def clear_logs(
 
 @router.post("/emit")
 def emit_custom_log(
-    payload: Dict[str, Any],
+    payload: LogCreate,
     db: Session = Depends(get_db),
 ):
     """Emit a custom diagnostic log entry."""
-    level = payload.get("level", "INFO")
-    module = payload.get("module", "custom")
-    message = payload.get("message", "")
-    detail = payload.get("detail")
-    experiment_id = payload.get("experiment_id")
-    target_id = payload.get("target_id")
-    data = payload.get("data")
+    if db.info.get("tenant_id") is not None:
+        if payload.experiment_id is None and payload.target_id is None:
+            raise HTTPException(422, "Specify an experiment or target for the log entry")
+        if payload.target_id is not None and db.get(Target, payload.target_id) is None:
+            raise HTTPException(404, "Target not found")
+        if payload.experiment_id is not None:
+            experiment = db.get(Experiment, payload.experiment_id)
+            if experiment is None:
+                raise HTTPException(404, "Experiment not found")
+            if payload.target_id is not None and payload.target_id != experiment.target_id:
+                raise HTTPException(422, "The experiment belongs to a different target")
 
-    event = LogService.emit(
-        level=level,
-        module=module,
-        message=message,
-        detail=detail,
-        experiment_id=experiment_id,
-        target_id=target_id,
-        data=data,
-        db=db,
-    )
+    event = LogService.emit(db=db, **payload.model_dump())
     return {"status": "ok", "event": event}

@@ -1,5 +1,4 @@
-import { useState, useEffect } from 'react';
-import axios from 'axios';
+import { useQuery } from '@tanstack/react-query';
 import { Link, useLocation } from 'react-router-dom';
 import {
   Radar,
@@ -15,6 +14,7 @@ import {
   Terminal,
 } from 'lucide-react';
 import { useUIStore } from '@/store/uiState';
+import api from '@/utils/request';
 
 const menuItems = [
   { name: 'Programs', hint: 'Bounty targets → 1-click hunt', path: '/programs', icon: Trophy },
@@ -30,27 +30,15 @@ const menuItems = [
 const Sidebar = () => {
   const location = useLocation();
   const { sidebarOpen, setSidebarOpen, sidebarCollapsed, toggleSidebarCollapsed } = useUIStore();
-  const [proxyCount, setProxyCount] = useState<number | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    const fetchProxyStatus = async () => {
-      try {
-        const res = await axios.get('/api/v1/proxy/status');
-        if (active && res.data && typeof res.data.active_count === 'number') {
-          setProxyCount(res.data.active_count);
-        }
-      } catch {
-        // Fallback silently if offline
-      }
-    };
-    fetchProxyStatus();
-    const interval = setInterval(fetchProxyStatus, 15000);
-    return () => {
-      active = false;
-      clearInterval(interval);
-    };
-  }, []);
+  const { data: proxyCount = null } = useQuery({
+    queryKey: ['proxy-status'],
+    queryFn: async ({ signal }) => {
+      const { data } = await api.get<{ active_count?: number }>('/proxy/status', { signal });
+      return typeof data.active_count === 'number' ? data.active_count : null;
+    },
+    refetchInterval: 15000,
+    retry: false,
+  });
 
   const isActive = (path: string) => {
     if (path === '/scan') return location.pathname === '/' || location.pathname.startsWith('/scan');

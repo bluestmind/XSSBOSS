@@ -64,18 +64,11 @@ if not defined BURP_API_KEY (
     echo [*] BURP_API_KEY is not set in this shell. The backend will use its configured default or .env value.
 )
 
-echo [+] Cleaning stale listeners on ports %API_PORT%, 8085, 8099, 8899...
-for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":%API_PORT%" ^| findstr "LISTENING"') do (
-    taskkill /F /PID %%p >nul 2>nul
-)
-for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":8085" ^| findstr "LISTENING"') do (
-    taskkill /F /PID %%p >nul 2>nul
-)
-for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":8099" ^| findstr "LISTENING"') do (
-    taskkill /F /PID %%p >nul 2>nul
-)
-for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":8899" ^| findstr "LISTENING"') do (
-    taskkill /F /PID %%p >nul 2>nul
+echo [+] Checking startup ports %API_PORT%, 8001, 3000, and 8099...
+powershell -NoProfile -Command "$busy = @(Get-NetTCPConnection -State Listen -ErrorAction Stop | Where-Object { $_.LocalPort -in @(%API_PORT%, 8001, 3000, 8099) }); if ($busy.Count) { $busy | Select-Object LocalAddress, LocalPort, OwningProcess | Format-Table -AutoSize; exit 1 }"
+if errorlevel 1 (
+    echo [!] Startup paused. Check the port status above and close only the services you intend to stop.
+    exit /b 1
 )
 
 set "PYTHON_CMD=python"
