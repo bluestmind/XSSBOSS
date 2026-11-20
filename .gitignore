@@ -37,22 +37,16 @@ medium_scraper_profile/
 .playwright-browsers/
 screenshots/
 
-# Campaign Evidence & Scan Reports
-evidence/
-reports/report_campaign_*
-reports/*.html
-reports/*.md
-reports/*.dump
-reports/*.tar.gz
-reports/*_evidence/
-reports/tenant_evidence_*
-reports/template_url_debug.json
-reports/*.png
-reports/recon_dossier_*
-reports/local_all_payloads_*
-reports/experiment_*
-reports/*_audit.json
-reports/*_debug.json
+# Generated reports and local research data
+/evidence/
+/reports/
+/benchmarks/results/
+/data/learned_param_dictionary.json
+/data/pdf_threat_intelligence.json
+/xss_writeups/
+/xss-lab/
+/docs/AUDIT_*.md
+/docs/READINESS_SCORECARD.md
 pdf/
 
 # Logs & Debug Output
@@ -73,6 +67,11 @@ extensions/burp-montoya-extension/build/
 # Local Tools & Scripts
 grep.exe
 run_burp.bat
+/hexstrike-ai/
+/fast_test_llm.py
+/run_fast_test.bat
+/tools/seed_real_findings.py
+/tools/test_box_bounty_suite.py
 
 # IDE & Assistant Caches
 .claude/

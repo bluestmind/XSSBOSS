@@ -56,15 +56,6 @@ jobs:
       - run: pip install -r backend_api/requirements.txt
       - run: python -m playwright install --with-deps chromium
       - run: python tools/run_hard_lab_e2e.py --artifact reports/hard_lab_accuracy.json
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: hard-lab-browser-accuracy
-          path: |
-            reports/hard_lab_accuracy.json
-            screenshots/
-          if-no-files-found: warn
-          retention-days: 30
 
   migration:
     runs-on: ubuntu-latest
@@ -208,22 +199,3 @@ jobs:
           python tools/observability_gate.py
           --start-server
           --artifact reports/observability_gate.json
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: scale-recovery-100x10000
-          path: |
-            reports/scale_recovery.json
-            reports/scale_recovery.workers.log
-            reports/backup_source_manifest.json
-            reports/backup_restore_verified.json
-            reports/backup_restore.dump
-            reports/backup_restore_evidence.tar.gz
-            reports/api_latency.json
-            reports/api_latency.server.log
-            reports/tenant_isolation.json
-            reports/tenant_isolation.server.log
-            reports/observability_gate.json
-            reports/observability_gate.server.log
-          if-no-files-found: warn
-          retention-days: 30

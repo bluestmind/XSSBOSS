@@ -34,8 +34,8 @@ every gate below is green in CI and in a production-like environment.
 
 - Production refuses SQLite, inline orchestration, default secrets, weak API auth,
   and localhost CORS origins.
-- No credentials are committed. Oracle tokens are high entropy, scoped, expiring,
-  and redacted from logs.
+- Keep credentials outside version control. Oracle tokens are high entropy,
+  scoped, expiring, and redacted from logs.
 - Readiness checks database and queue; metrics have low-cardinality labels and no
   target URLs or payloads.
 - Backups, restore drills, retention, tenant isolation, rate quotas, audit logging,
@@ -45,16 +45,15 @@ every gate below is green in CI and in a production-like environment.
 
 The score is the weighted percentage of passing gates. A release cannot be
 described as 10/10 until the expanded accuracy corpus, crash-recovery load test,
-hosted CI run, and independent security review are attached to the same release.
+hosted CI run, and independent security review are recorded for the same release.
 
 The reproducible implementation for the sustained and kill/recovery checks is
 `tools/scale_recovery_gate.py`. It refuses SQLite and sub-threshold run sizes so
 a reduced local smoke cannot be mistaken for production evidence.
 
-The current green scale artifact is `reports/scale_recovery_reconciled.json`.
-It uses late-acked durable micro-batches and a database-backed recovery sweep so
-broker-reserved work is reconstructed from authoritative case state after a
-restart. Per-case leases and idempotency still absorb late duplicate delivery.
+The scale check uses late-acked durable micro-batches and a database-backed
+recovery sweep to reconstruct broker-reserved work from authoritative case state
+after a restart. Per-case leases and idempotency handle late duplicate delivery.
 
 `tools/verify_restore.py` compares authoritative row counts and recomputes every
 content-addressed artifact after the database and evidence volume are restored
